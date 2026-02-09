@@ -1,0 +1,24 @@
+{
+  "name": "soundcloud-auto-sync",
+  "version": "2.0.0",
+  "description": "SoundCloud - Auto Sync/Downloader. Automatically sync and download SoundCloud likes and playlists.",
+  "main": "src/main.js",
+  "bin": {
+    "soundcloud-sync": "./cli.js"
+  },
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "0.27.2",
+    "electron-store": "8.1.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  }
+}

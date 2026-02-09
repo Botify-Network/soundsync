@@ -1,0 +1,19 @@
+appId: com.scautosync.app
+productName: SoundCloud Auto Sync
+directories:
+  output: dist
+files:
+  - "**/*"
+  - "!dist"
+extraResources:
+  - from: resources/
+    to: ./
+    filter:
+      - "*.exe"
+win:
+  target: nsis
+  icon: assets/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: assets/icon.ico
