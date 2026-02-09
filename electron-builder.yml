@@ -17,3 +17,7 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   installerIcon: assets/icon.ico
+publish:
+  provider: github
+  owner: JG2547
+  repo: sc-auto-downloader

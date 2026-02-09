@@ -120,7 +120,7 @@ async function runDiagnostics() {
   process.stdout.write('  Testing SoundCloud connection... ');
   try {
     const ytdlp = getYtDlpPath();
-    execSync(`"${ytdlp}" --flat-playlist --playlist-items 1 -j "https://soundcloud.com/discover"`, {
+    execSync(`"${ytdlp}" --flat-playlist --playlist-items 1 -j "https://soundcloud.com/charts/top"`, {
       encoding: 'utf8',
       timeout: 30000,
       stdio: ['pipe', 'pipe', 'pipe']

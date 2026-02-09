@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, powerSaveBlocker } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
@@ -570,6 +571,11 @@ ipcMain.on('download-url', async (event, url) => {
   }
 });
 
+// Return app version to renderer
+ipcMain.on('get-app-version', (event) => {
+  event.returnValue = app.getVersion();
+});
+
 ipcMain.on('get-settings', (event) => {
   event.reply('settings-data', {
     downloadPath: store.get('downloadPath', app.getPath('music')),
@@ -719,7 +725,7 @@ ipcMain.on('run-diagnostics', async (event) => {
   event.reply('diagnostic-update', { test: 'soundcloud', status: 'running', message: 'Connecting to SoundCloud...' });
   try {
     const ytdlpPath = getYtDlpPath();
-    await execPromise(`"${ytdlpPath}" --flat-playlist --playlist-items 1 -j "https://soundcloud.com/discover"`, { timeout: 30000 });
+    await execPromise(`"${ytdlpPath}" --flat-playlist --playlist-items 1 -j "https://soundcloud.com/charts/top"`, { timeout: 30000 });
     event.reply('diagnostic-update', { test: 'soundcloud', status: 'pass', message: 'Connected to SoundCloud successfully' });
     passed++;
   } catch (error) {
@@ -858,6 +864,36 @@ app.whenReady().then(() => {
       console.log('Failed to check for yt-dlp updates:', error.message);
     }
   }, 5000); // Check 5 seconds after startup
+
+  // Auto-updater: check for app updates from GitHub Releases
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('App update available:', info.version);
+    tray.displayBalloon({
+      title: 'Update Available',
+      content: `Version ${info.version} is downloading in the background.`
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log('App update downloaded:', info.version);
+    tray.displayBalloon({
+      title: 'Update Ready',
+      content: `Version ${info.version} will be installed on next restart.`
+    });
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.log('Auto-updater error:', err.message);
+  });
+
+  setTimeout(() => {
+    autoUpdater.checkForUpdatesAndNotify().catch(err => {
+      console.log('Update check failed:', err.message);
+    });
+  }, 10000);
 
   // Don't show window on start - run in background
   app.dock?.hide(); // Hide dock icon on macOS

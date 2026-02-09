@@ -636,7 +636,7 @@
     <div class="sidebar">
       <div class="sidebar-brand">
         <h1>SC Auto Sync</h1>
-        <div class="version">v2.0.0</div>
+        <div class="version" id="appVersion">v2.0.1</div>
       </div>
 
       <div class="sidebar-nav">
@@ -794,6 +794,50 @@
         <div class="page" id="page-monitoring">
           <div class="card">
             <div class="card-header">
+              <h3>Quick Follow</h3>
+              <span style="font-size: 10px; font-weight: 600; background: #3B82F6; color: #fff; padding: 2px 8px; border-radius: 10px;">Presets</span>
+            </div>
+            <div class="card-body">
+              <p class="field-hint" style="margin-bottom: 12px;">Monitor likes from featured creators</p>
+              <div class="list-container" id="quickFollowUsers">
+                <label class="list-item" style="cursor: pointer;">
+                  <input type="checkbox" id="followPrime" onchange="toggleQuickFollow('haus-of-prime', this.checked)" style="width: 16px; height: 16px; margin-right: 12px; accent-color: #3B82F6;">
+                  <div class="item-info">
+                    <div class="item-title">PRIME</div>
+                    <div class="item-sub">soundcloud.com/haus-of-prime/likes</div>
+                  </div>
+                </label>
+                <label class="list-item" style="cursor: pointer;">
+                  <input type="checkbox" id="followHighTexas" onchange="toggleQuickFollow('hightexas', this.checked)" style="width: 16px; height: 16px; margin-right: 12px; accent-color: #3B82F6;">
+                  <div class="item-info">
+                    <div class="item-title">HIGH TEXAS</div>
+                    <div class="item-sub">soundcloud.com/hightexas/likes</div>
+                  </div>
+                </label>
+                <label class="list-item" style="cursor: pointer;">
+                  <input type="checkbox" id="followVIP" onchange="toggleQuickFollow('willbrvip', this.checked)" style="width: 16px; height: 16px; margin-right: 12px; accent-color: #3B82F6;">
+                  <div class="item-info">
+                    <div class="item-title">The VIP Room</div>
+                    <div class="item-sub">soundcloud.com/willbrvip/likes</div>
+                  </div>
+                </label>
+              </div>
+
+              <p class="field-hint" style="margin-top: 16px; margin-bottom: 12px;">Featured playlists</p>
+              <div class="list-container">
+                <label class="list-item" style="cursor: pointer;">
+                  <input type="checkbox" id="followPrimeJukebox" onchange="toggleQuickFollowPlaylist('https://soundcloud.com/haus-of-prime/sets/jukebox', this.checked)" style="width: 16px; height: 16px; margin-right: 12px; accent-color: #3B82F6;">
+                  <div class="item-info">
+                    <div class="item-title">PRIME Jukebox</div>
+                    <div class="item-sub">soundcloud.com/haus-of-prime/sets/jukebox</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
               <h3>Monitored Users</h3>
             </div>
             <div class="card-body">
@@ -929,6 +973,12 @@
       document.getElementById('pageDesc').textContent = titles[page][1];
     }
 
+    // ── Set app version ──
+    try {
+      const ver = window.api.getAppVersion();
+      if (ver) document.getElementById('appVersion').textContent = 'v' + ver;
+    } catch (e) {}
+
     // ── Load Settings ──
     window.api.send('get-settings');
     window.api.send('get-status');
@@ -964,6 +1014,7 @@
       });
 
       updateDashboardSources();
+      updateQuickFollowCheckboxes();
     }
 
     function updateDashboardStatus(data) {
@@ -1017,6 +1068,55 @@
       const total = users.length + playlists.length;
       document.getElementById('statMonitoring').textContent = `${total}`;
       document.getElementById('statMonitoringSub').textContent = `${users.length} users, ${playlists.length} playlists`;
+    }
+
+    // ── Quick Follow Presets ──
+    function updateQuickFollowCheckboxes() {
+      const users = settings.monitoredUsers || [];
+      document.getElementById('followPrime').checked = users.includes('haus-of-prime');
+      document.getElementById('followHighTexas').checked = users.includes('hightexas');
+      document.getElementById('followVIP').checked = users.includes('willbrvip');
+
+      const playlists = settings.monitoredPlaylists || [];
+      document.getElementById('followPrimeJukebox').checked = playlists.includes('https://soundcloud.com/haus-of-prime/sets/jukebox');
+    }
+
+    function toggleQuickFollow(username, checked) {
+      if (!settings.monitoredUsers) settings.monitoredUsers = [];
+
+      if (checked) {
+        if (!settings.monitoredUsers.includes(username)) {
+          settings.monitoredUsers.push(username);
+        }
+      } else {
+        const idx = settings.monitoredUsers.indexOf(username);
+        if (idx > -1) settings.monitoredUsers.splice(idx, 1);
+      }
+
+      // Refresh the users list
+      const usersList = document.getElementById('usersList');
+      usersList.innerHTML = '';
+      settings.monitoredUsers.forEach(user => addUserItem(user));
+      updateDashboardSources();
+    }
+
+    function toggleQuickFollowPlaylist(playlistUrl, checked) {
+      if (!settings.monitoredPlaylists) settings.monitoredPlaylists = [];
+
+      if (checked) {
+        if (!settings.monitoredPlaylists.includes(playlistUrl)) {
+          settings.monitoredPlaylists.push(playlistUrl);
+          addPlaylistItem(playlistUrl);
+        }
+      } else {
+        const idx = settings.monitoredPlaylists.indexOf(playlistUrl);
+        if (idx > -1) settings.monitoredPlaylists.splice(idx, 1);
+
+        const playlistsList = document.getElementById('playlistsList');
+        playlistsList.innerHTML = '';
+        settings.monitoredPlaylists.forEach(url => addPlaylistItem(url));
+      }
+      updateDashboardSources();
     }
 
     // ── User Management ──

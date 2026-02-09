@@ -49,6 +49,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.removeListener(channel, callback);
   },
 
+  // Get app version synchronously
+  getAppVersion: () => {
+    return ipcRenderer.sendSync('get-app-version');
+  },
+
   // Shell operations
   openPath: (filePath) => {
     shell.openPath(filePath);
