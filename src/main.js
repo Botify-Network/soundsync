@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, powerSaveBlocker } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
@@ -15,6 +15,23 @@ let tray = null;
 let settingsWindow = null;
 let monitor = null;
 let downloader = null;
+let powerSaveId = null;
+
+// Prevent system sleep during active operations
+function blockSleep() {
+  if (powerSaveId === null) {
+    powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
+    console.log('Power save blocker started:', powerSaveId);
+  }
+}
+
+function unblockSleep() {
+  if (powerSaveId !== null && powerSaveBlocker.isStarted(powerSaveId)) {
+    powerSaveBlocker.stop(powerSaveId);
+    console.log('Power save blocker stopped:', powerSaveId);
+    powerSaveId = null;
+  }
+}
 
 // Status tracking
 let appStatus = {
@@ -159,8 +176,9 @@ function promptForURL() {
     frame: true,
     title: 'Download from URL',
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      preload: path.join(__dirname, 'preload-input.js'),
+      contextIsolation: true,
+      nodeIntegration: false
     }
   });
 
@@ -228,26 +246,24 @@ function promptForURL() {
       <h3>Download from SoundCloud URL</h3>
       <input type="text" id="url" placeholder="Enter SoundCloud track or playlist URL" autofocus />
       <div class="buttons">
-        <button class="download" onclick="download()">Download</button>
-        <button class="cancel" onclick="cancel()">Cancel</button>
+        <button class="download" onclick="doDownload()">Download</button>
+        <button class="cancel" onclick="doCancel()">Cancel</button>
       </div>
       <script>
-        const { ipcRenderer } = require('electron');
-
         document.getElementById('url').addEventListener('keypress', (e) => {
-          if (e.key === 'Enter') download();
+          if (e.key === 'Enter') doDownload();
         });
 
-        function download() {
+        function doDownload() {
           const url = document.getElementById('url').value.trim();
           if (url) {
-            ipcRenderer.send('download-url', url);
-            window.close();
+            window.api.sendDownloadUrl(url);
+            window.api.closeWindow();
           }
         }
 
-        function cancel() {
-          window.close();
+        function doCancel() {
+          window.api.closeWindow();
         }
       </script>
     </body>
@@ -271,8 +287,9 @@ function createSettingsWindow() {
     title: 'SoundCloud - Auto Sync/Downloader',
     icon: path.join(__dirname, '../assets/icon.png'),
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
     },
     autoHideMenuBar: true
   });
@@ -324,9 +341,12 @@ async function syncNow() {
   appStatus.syncStatus = 'In Progress';
   updateTrayMenu();
   tray.setToolTip('SoundCloud - Syncing...');
+  blockSleep();
 
   monitor.syncAll()
     .then((results) => {
+      unblockSleep();
+
       // Update status
       appStatus.currentActivity = 'Idle';
       appStatus.syncStatus = 'Complete';
@@ -369,6 +389,7 @@ async function syncNow() {
       }, 3000);
     })
     .catch((error) => {
+      unblockSleep();
       console.error('Sync error:', error);
 
       // Update status on error
@@ -499,6 +520,7 @@ ipcMain.on('download-url', async (event, url) => {
     // Update status
     appStatus.currentActivity = isPlaylist ? 'Downloading Playlist...' : 'Downloading...';
     updateTrayMenu();
+    blockSleep();
 
     if (isPlaylist) {
       tray.displayBalloon({
@@ -509,6 +531,7 @@ ipcMain.on('download-url', async (event, url) => {
 
     const result = await downloader.downloadFromURL(url, downloadPath);
 
+    unblockSleep();
     // Update status
     appStatus.currentActivity = 'Idle';
 
@@ -532,6 +555,7 @@ ipcMain.on('download-url', async (event, url) => {
       });
     }
   } catch (error) {
+    unblockSleep();
     appStatus.currentActivity = 'Idle';
     updateTrayMenu();
 
@@ -552,6 +576,7 @@ ipcMain.on('get-settings', (event) => {
     autoSync: store.get('autoSync', false),
     syncInterval: store.get('syncInterval', 15),
     autoStart: store.get('autoStart', false),
+    skipThumbnail: store.get('skipThumbnail', false),
     monitoredUsers: store.get('monitoredUsers', []),
     monitoredPlaylists: store.get('monitoredPlaylists', [])
   });
@@ -568,6 +593,7 @@ ipcMain.on('save-settings', (event, settings) => {
   store.set('downloadPath', settings.downloadPath);
   store.set('syncInterval', settings.syncInterval);
   store.set('autoStart', settings.autoStart);
+  store.set('skipThumbnail', settings.skipThumbnail || false);
   store.set('monitoredUsers', settings.monitoredUsers);
   store.set('monitoredPlaylists', settings.monitoredPlaylists);
 
@@ -756,7 +782,7 @@ ipcMain.on('fetch-playlist-metadata', async (event, url) => {
 // App lifecycle
 app.whenReady().then(() => {
   // Initialize downloader
-  downloader = new Downloader();
+  downloader = new Downloader(store);
 
   // Load saved download count
   appStatus.downloadCount = store.get('downloadCount', 0);
@@ -791,6 +817,7 @@ app.whenReady().then(() => {
 
     if (isStuck && stuckDuration > maxStuckTime) {
       console.warn(`Status stuck in "${appStatus.currentActivity}" for ${Math.floor(stuckDuration / 60000)} minutes - resetting`);
+      unblockSleep();
 
       appStatus.currentActivity = 'Idle';
       appStatus.syncStatus = 'Error - Timed Out';
@@ -841,6 +868,7 @@ app.on('window-all-closed', (e) => {
 });
 
 app.on('before-quit', () => {
+  unblockSleep();
   if (monitor) {
     monitor.stop();
   }

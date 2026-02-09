@@ -744,6 +744,24 @@
 
           <div class="card">
             <div class="card-header">
+              <h3>Audio Options</h3>
+            </div>
+            <div class="card-body">
+              <div class="toggle-row">
+                <div class="toggle-info">
+                  <div class="toggle-label">Skip thumbnail embedding</div>
+                  <div class="toggle-desc">Download audio files only, without embedding cover art images</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="skipThumbnail">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
               <h3>Startup</h3>
             </div>
             <div class="card-body">
@@ -887,8 +905,6 @@
   <div class="toast" id="toast">Settings saved successfully</div>
 
   <script>
-    const { ipcRenderer, shell } = require('electron');
-
     let settings = {};
 
     // ── Page Navigation ──
@@ -914,15 +930,15 @@
     }
 
     // ── Load Settings ──
-    ipcRenderer.send('get-settings');
-    ipcRenderer.send('get-status');
+    window.api.send('get-settings');
+    window.api.send('get-status');
 
-    ipcRenderer.on('settings-data', (event, data) => {
+    window.api.on('settings-data', (data) => {
       settings = data;
       populateSettings();
     });
 
-    ipcRenderer.on('status-data', (event, data) => {
+    window.api.on('status-data', (data) => {
       updateDashboardStatus(data);
     });
 
@@ -931,6 +947,7 @@
       document.getElementById('syncInterval').value = settings.syncInterval;
       document.getElementById('autoStart').checked = settings.autoStart;
       document.getElementById('autoSync').checked = settings.autoSync;
+      document.getElementById('skipThumbnail').checked = settings.skipThumbnail || false;
 
       // Populate users
       const usersList = document.getElementById('usersList');
@@ -1084,22 +1101,22 @@
 
     async function fetchPlaylistMetadata(url) {
       return new Promise((resolve, reject) => {
-        ipcRenderer.send('fetch-playlist-metadata', url);
+        window.api.send('fetch-playlist-metadata', url);
 
         const timeout = setTimeout(() => {
-          ipcRenderer.removeListener('playlist-metadata-result', handler);
+          window.api.removeListener('playlist-metadata-result', handler);
           reject(new Error('Timeout'));
         }, 10000);
 
-        const handler = (event, result) => {
+        const handler = (result) => {
           if (result.url !== url) return;
           clearTimeout(timeout);
-          ipcRenderer.removeListener('playlist-metadata-result', handler);
+          window.api.removeListener('playlist-metadata-result', handler);
           if (result.success) resolve(result.metadata);
           else reject(new Error(result.error));
         };
 
-        ipcRenderer.on('playlist-metadata-result', handler);
+        window.api.on('playlist-metadata-result', handler);
       });
     }
 
@@ -1144,10 +1161,10 @@
 
     // ── Folder Picker ──
     function chooseFolder() {
-      ipcRenderer.send('choose-folder');
+      window.api.send('choose-folder');
     }
 
-    ipcRenderer.on('folder-chosen', (event, folderPath) => {
+    window.api.on('folder-chosen', (folderPath) => {
       document.getElementById('downloadPath').value = folderPath;
     });
 
@@ -1158,14 +1175,15 @@
         syncInterval: parseInt(document.getElementById('syncInterval').value),
         autoStart: document.getElementById('autoStart').checked,
         autoSync: document.getElementById('autoSync').checked,
+        skipThumbnail: document.getElementById('skipThumbnail').checked,
         monitoredUsers: settings.monitoredUsers || [],
         monitoredPlaylists: settings.monitoredPlaylists || []
       };
 
-      ipcRenderer.send('save-settings', newSettings);
+      window.api.send('save-settings', newSettings);
     }
 
-    ipcRenderer.on('settings-saved', () => {
+    window.api.on('settings-saved', () => {
       showToast('Settings saved');
     });
 
@@ -1178,27 +1196,27 @@
 
     // ── Actions ──
     function triggerSync() {
-      ipcRenderer.send('test-sync');
+      window.api.send('test-sync');
       showToast('Starting sync...');
     }
 
-    ipcRenderer.on('test-sync-complete', (event, result) => {
+    window.api.on('test-sync-complete', (result) => {
       showToast(result.success ? 'Sync completed' : 'Sync failed: ' + result.error);
     });
 
     function openDownloadFolder() {
       const downloadPath = document.getElementById('downloadPath').value;
       if (downloadPath) {
-        shell.openPath(downloadPath);
+        window.api.openPath(downloadPath);
       }
     }
 
     // ── yt-dlp Version ──
     function checkYtDlpVersion() {
-      ipcRenderer.send('check-ytdlp-update');
+      window.api.send('check-ytdlp-update');
     }
 
-    ipcRenderer.on('ytdlp-update-info', (event, info) => {
+    window.api.on('ytdlp-update-info', (info) => {
       const versionEl = document.getElementById('ytdlpVersion');
       const statusEl = document.getElementById('ytdlpUpdateStatus');
       const updateBtn = document.getElementById('updateYtdlpBtn');
@@ -1232,14 +1250,14 @@
       updateBtn.textContent = 'Updating...';
       statusEl.textContent = 'Downloading...';
       statusEl.className = 'version-status';
-      ipcRenderer.send('update-ytdlp');
+      window.api.send('update-ytdlp');
     }
 
-    ipcRenderer.on('ytdlp-update-progress', (event, progress) => {
+    window.api.on('ytdlp-update-progress', (progress) => {
       document.getElementById('ytdlpUpdateStatus').textContent = progress;
     });
 
-    ipcRenderer.on('ytdlp-update-result', (event, result) => {
+    window.api.on('ytdlp-update-result', (result) => {
       const statusEl = document.getElementById('ytdlpUpdateStatus');
       const updateBtn = document.getElementById('updateYtdlpBtn');
       const versionEl = document.getElementById('ytdlpVersion');
@@ -1308,14 +1326,14 @@
       btn.textContent = 'Running...';
 
       resetAllTests();
-      ipcRenderer.send('run-diagnostics');
+      window.api.send('run-diagnostics');
     }
 
-    ipcRenderer.on('diagnostic-update', (event, data) => {
+    window.api.on('diagnostic-update', (data) => {
       setTestStatus(data.test, data.status, data.message);
     });
 
-    ipcRenderer.on('diagnostic-complete', (event, results) => {
+    window.api.on('diagnostic-complete', (results) => {
       diagnosticsRunning = false;
       const btn = document.getElementById('runDiagnosticsBtn');
       btn.disabled = false;

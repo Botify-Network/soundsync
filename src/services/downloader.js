@@ -52,7 +52,8 @@ function getFfmpegPath() {
 }
 
 class Downloader {
-  constructor() {
+  constructor(store) {
+    this.store = store || null;
     this.downloadQueue = [];
     this.isProcessing = false;
   }
@@ -195,15 +196,20 @@ class Downloader {
     // Use title only - artist metadata is embedded in the file anyway
     const outputTemplate = path.join(downloadPath, '%(title)s.%(ext)s');
 
+    const skipThumbnail = this.store ? this.store.get('skipThumbnail', false) : false;
+
     const args = [
       '--extract-audio',
       '--audio-format', 'mp3',
       '--audio-quality', '0',
-      '--embed-thumbnail',
       '--add-metadata',
       '--no-overwrites',
       '--output', outputTemplate
     ];
+
+    if (!skipThumbnail) {
+      args.push('--embed-thumbnail');
+    }
 
     // Add ffmpeg location if bundled ffmpeg is available
     const ffmpegPath = getFfmpegPath();
