@@ -725,11 +725,22 @@ ipcMain.on('run-diagnostics', async (event) => {
   event.reply('diagnostic-update', { test: 'soundcloud', status: 'running', message: 'Connecting to SoundCloud...' });
   try {
     const ytdlpPath = getYtDlpPath();
-    await execPromise(`"${ytdlpPath}" --flat-playlist --playlist-items 1 -j "https://soundcloud.com/charts/top"`, { timeout: 30000 });
+    await execPromise(`"${ytdlpPath}" --flat-playlist --playlist-items 1 -j "https://soundcloud.com/discover"`, { timeout: 30000 });
     event.reply('diagnostic-update', { test: 'soundcloud', status: 'pass', message: 'Connected to SoundCloud successfully' });
     passed++;
   } catch (error) {
-    event.reply('diagnostic-update', { test: 'soundcloud', status: 'fail', message: 'Cannot connect to SoundCloud' });
+    const stderr = error.stderr || error.message || '';
+    let message = 'Cannot connect to SoundCloud';
+    if (stderr.includes('Unsupported URL') || stderr.includes('no suitable InfoExtractor')) {
+      message = 'yt-dlp cannot extract from SoundCloud - try updating yt-dlp';
+    } else if (stderr.includes('HTTP Error 403') || stderr.includes('HTTP Error 401')) {
+      message = 'SoundCloud is blocking requests - try updating yt-dlp';
+    } else if (stderr.includes('getaddrinfo') || stderr.includes('URLError') || stderr.includes('Connection refused')) {
+      message = 'Cannot reach SoundCloud - check your internet connection';
+    } else if (stderr.includes('timed out')) {
+      message = 'Connection to SoundCloud timed out';
+    }
+    event.reply('diagnostic-update', { test: 'soundcloud', status: 'fail', message });
     failed++;
   }
 

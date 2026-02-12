@@ -120,7 +120,7 @@ async function runDiagnostics() {
   process.stdout.write('  Testing SoundCloud connection... ');
   try {
     const ytdlp = getYtDlpPath();
-    execSync(`"${ytdlp}" --flat-playlist --playlist-items 1 -j "https://soundcloud.com/charts/top"`, {
+    execSync(`"${ytdlp}" --flat-playlist --playlist-items 1 -j "https://soundcloud.com/discover"`, {
       encoding: 'utf8',
       timeout: 30000,
       stdio: ['pipe', 'pipe', 'pipe']
@@ -128,7 +128,14 @@ async function runDiagnostics() {
     logStatus('SoundCloud', 'pass', 'Connected');
     passed++;
   } catch (e) {
-    logStatus('SoundCloud', 'fail', 'Cannot connect');
+    const stderr = (e.stderr || e.message || '').toString();
+    let msg = 'Cannot connect';
+    if (stderr.includes('Unsupported URL') || stderr.includes('no suitable InfoExtractor')) {
+      msg = 'yt-dlp cannot extract from SoundCloud - try updating yt-dlp';
+    } else if (stderr.includes('getaddrinfo') || stderr.includes('URLError')) {
+      msg = 'Check your internet connection';
+    }
+    logStatus('SoundCloud', 'fail', msg);
     failed++;
   }
 

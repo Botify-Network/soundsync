@@ -388,14 +388,21 @@ class Downloader {
 
       const latestVersion = response.data.tag_name;
 
-      // Compare versions (format: YYYY.MM.DD)
-      const updateAvailable = latestVersion > currentVersion;
+      // Find the .exe asset download URL from the release
+      let downloadUrl = `https://github.com/yt-dlp/yt-dlp/releases/download/${latestVersion}/yt-dlp.exe`;
+      const exeAsset = response.data.assets && response.data.assets.find(a => a.name === 'yt-dlp.exe');
+      if (exeAsset && exeAsset.browser_download_url) {
+        downloadUrl = exeAsset.browser_download_url;
+      }
+
+      // Compare versions (format: YYYY.MM.DD or YYYY.MM.DD.N)
+      const updateAvailable = latestVersion !== currentVersion && latestVersion > currentVersion;
 
       return {
         updateAvailable,
         currentVersion,
         latestVersion,
-        downloadUrl: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
+        downloadUrl
       };
     } catch (error) {
       console.error('Failed to check for yt-dlp updates:', error.message);
@@ -430,7 +437,12 @@ class Downloader {
         method: 'get',
         url: updateInfo.downloadUrl,
         responseType: 'stream',
-        timeout: 120000
+        timeout: 120000,
+        maxRedirects: 5,
+        headers: {
+          'User-Agent': 'SoundCloud-Sync-App',
+          'Accept': 'application/octet-stream'
+        }
       });
 
       const writer = fs.createWriteStream(tempPath);
@@ -439,7 +451,15 @@ class Downloader {
       await new Promise((resolve, reject) => {
         writer.on('finish', resolve);
         writer.on('error', reject);
+        response.data.on('error', reject);
       });
+
+      // Verify downloaded file is valid (should be > 1MB for yt-dlp.exe)
+      const stats = fs.statSync(tempPath);
+      if (stats.size < 1024 * 1024) {
+        fs.unlinkSync(tempPath);
+        return { success: false, error: 'Downloaded file is too small - possible corrupt download' };
+      }
 
       if (progressCallback) progressCallback('Installing update...');
 
@@ -451,6 +471,9 @@ class Downloader {
 
       // Verify the update
       const newVersion = await this.getYtDlpVersion();
+      if (!newVersion) {
+        return { success: false, error: 'Update installed but version check failed - executable may be corrupted' };
+      }
 
       return {
         success: true,
@@ -459,6 +482,18 @@ class Downloader {
         newVersion
       };
     } catch (error) {
+      // Clean up temp file if it exists
+      try {
+        let targetPath;
+        if (process.resourcesPath) {
+          targetPath = path.join(process.resourcesPath, 'yt-dlp.exe');
+        } else {
+          targetPath = path.join(__dirname, '..', '..', 'resources', 'yt-dlp.exe');
+        }
+        const tempPath = targetPath + '.tmp';
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      } catch (_) { /* ignore cleanup errors */ }
+
       console.error('Failed to update yt-dlp:', error.message);
       return { success: false, error: error.message };
     }
