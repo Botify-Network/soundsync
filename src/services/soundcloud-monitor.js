@@ -1,31 +1,5 @@
-const { exec } = require('child_process');
-const util = require('util');
-const path = require('path');
-const fs = require('fs');
-const execPromise = util.promisify(exec);
-
-/**
- * Get the path to yt-dlp executable
- * Checks bundled version first, then falls back to system PATH
- */
-function getYtDlpPath() {
-  // Check for bundled yt-dlp in resources folder (packaged app)
-  if (process.resourcesPath) {
-    const bundledPath = path.join(process.resourcesPath, 'yt-dlp.exe');
-    if (fs.existsSync(bundledPath)) {
-      return `"${bundledPath}"`;
-    }
-  }
-
-  // Check for bundled yt-dlp in development mode
-  const devPath = path.join(__dirname, '..', '..', 'resources', 'yt-dlp.exe');
-  if (fs.existsSync(devPath)) {
-    return `"${devPath}"`;
-  }
-
-  // Fall back to system PATH
-  return 'yt-dlp';
-}
+const { spawn } = require('child_process');
+const { getYtDlpPath } = require('./paths');
 
 class SoundCloudMonitor {
   constructor(store, downloader) {
@@ -97,7 +71,12 @@ class SoundCloudMonitor {
     try {
       const monitoredUsers = this.store.get('monitoredUsers', []);
       const monitoredPlaylists = this.store.get('monitoredPlaylists', []);
-      const downloadPath = this.store.get('downloadPath');
+      const downloadPath = this.store.get('downloadPath', '');
+
+      if (!downloadPath) {
+        results.errors.push('Download path not configured');
+        return results;
+      }
 
       // Monitor user likes
       for (const username of monitoredUsers) {
@@ -198,47 +177,60 @@ class SoundCloudMonitor {
   }
 
   /**
-   * Fast flat-playlist scan to get track IDs without full metadata
+   * Fast flat-playlist scan to get track IDs without full metadata.
+   * Uses spawn() to avoid shell injection.
    */
   async getFlatTrackList(url) {
     try {
       const ytdlpPath = getYtDlpPath();
-      const command = `${ytdlpPath} --flat-playlist -j "${url}"`;
+      const args = ['--flat-playlist', '-j', url];
 
-      const { stdout } = await execPromise(command, {
-        maxBuffer: 1024 * 1024 * 50,
-        timeout: 5 * 60 * 1000
+      return new Promise((resolve, reject) => {
+        const proc = spawn(ytdlpPath, args, { timeout: 5 * 60 * 1000 });
+        let stdout = '';
+        let stderr = '';
+
+        proc.stdout.on('data', (data) => { stdout += data.toString(); });
+        proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+        proc.on('error', (error) => {
+          if (error.message.includes('ENOENT') || error.message.includes('not found')) {
+            reject(new Error('yt-dlp is not installed. Please install yt-dlp to enable monitoring.'));
+          } else {
+            reject(error);
+          }
+        });
+
+        proc.on('close', (code) => {
+          if (!stdout) { resolve([]); return; }
+
+          const tracks = [];
+          const lines = stdout.trim().split('\n');
+
+          for (const line of lines) {
+            try {
+              const data = JSON.parse(line);
+              tracks.push({
+                id: data.id,
+                url: data.url || data.webpage_url
+              });
+            } catch (e) {
+              // skip unparseable lines
+            }
+          }
+
+          resolve(tracks);
+        });
       });
-
-      if (!stdout) return [];
-
-      const tracks = [];
-      const lines = stdout.trim().split('\n');
-
-      for (const line of lines) {
-        try {
-          const data = JSON.parse(line);
-          tracks.push({
-            id: data.id,
-            url: data.url || data.webpage_url
-          });
-        } catch (e) {
-          // skip unparseable lines
-        }
-      }
-
-      return tracks;
     } catch (error) {
       console.error(`Error fetching flat track list for ${url}:`, error.message);
-      if (error.message.includes('not found') || error.message.includes('not recognized')) {
-        throw new Error('yt-dlp is not installed. Please install yt-dlp to enable monitoring.');
-      }
       return [];
     }
   }
 
   /**
-   * Fetch full metadata for specific tracks (title, artist, etc.)
+   * Fetch full metadata for specific tracks (title, artist, etc.).
+   * Uses spawn() to avoid shell injection.
    */
   async getFullMetadata(trackList) {
     const tracks = [];
@@ -247,11 +239,21 @@ class SoundCloudMonitor {
     for (const item of trackList) {
       try {
         const trackUrl = item.url || `https://soundcloud.com/track/${item.id}`;
-        const command = `${ytdlpPath} --dump-json --skip-download "${trackUrl}"`;
+        const args = ['--dump-json', '--skip-download', trackUrl];
 
-        const { stdout } = await execPromise(command, {
-          maxBuffer: 1024 * 1024 * 5,
-          timeout: 30000
+        const stdout = await new Promise((resolve, reject) => {
+          const proc = spawn(ytdlpPath, args, { timeout: 30000 });
+          let out = '';
+          let err = '';
+
+          proc.stdout.on('data', (data) => { out += data.toString(); });
+          proc.stderr.on('data', (data) => { err += data.toString(); });
+
+          proc.on('error', reject);
+          proc.on('close', (code) => {
+            if (code === 0 && out) resolve(out);
+            else reject(new Error(err || `yt-dlp exited with code ${code}`));
+          });
         });
 
         if (stdout) {
@@ -280,13 +282,6 @@ class SoundCloudMonitor {
     }
 
     return tracks;
-  }
-
-  filterNewTracks(tracks, sourceKey) {
-    const syncedTracks = this.store.get(`synced_${sourceKey}`, []);
-    const syncedIds = new Set(syncedTracks);
-
-    return tracks.filter(track => !syncedIds.has(track.id));
   }
 
   updateSyncedTracks(newTracks, sourceKey) {

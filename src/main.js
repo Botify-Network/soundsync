@@ -8,6 +8,7 @@ const execPromise = util.promisify(exec);
 const Store = require('electron-store');
 const SoundCloudMonitor = require('./services/soundcloud-monitor');
 const Downloader = require('./services/downloader');
+const { getYtDlpPath, getFfmpegPath } = require('./services/paths');
 
 // Initialize persistent storage
 const store = new Store();
@@ -17,6 +18,7 @@ let settingsWindow = null;
 let monitor = null;
 let downloader = null;
 let powerSaveId = null;
+let isSyncing = false;
 
 // Prevent system sleep during active operations
 function blockSleep() {
@@ -303,6 +305,11 @@ function createSettingsWindow() {
 }
 
 async function syncNow() {
+  if (isSyncing) {
+    console.log('Sync already in progress, skipping');
+    return;
+  }
+
   if (!monitor) {
     monitor = new SoundCloudMonitor(store, downloader);
   }
@@ -338,6 +345,7 @@ async function syncNow() {
   console.log(`Starting sync with ${monitoredUsers.length} users and ${monitoredPlaylists.length} playlists`);
 
   // Update status
+  isSyncing = true;
   appStatus.currentActivity = 'Syncing...';
   appStatus.syncStatus = 'In Progress';
   updateTrayMenu();
@@ -346,6 +354,7 @@ async function syncNow() {
 
   monitor.syncAll()
     .then((results) => {
+      isSyncing = false;
       unblockSleep();
 
       // Update status
@@ -390,6 +399,7 @@ async function syncNow() {
       }, 3000);
     })
     .catch((error) => {
+      isSyncing = false;
       unblockSleep();
       console.error('Sync error:', error);
 
@@ -476,31 +486,15 @@ function togglePause() {
   }
 }
 
-// Helper to get yt-dlp path
-function getYtDlpPath() {
-  if (process.resourcesPath) {
-    const bundledPath = path.join(process.resourcesPath, 'yt-dlp.exe');
-    if (fs.existsSync(bundledPath)) return bundledPath;
-  }
-  const devPath = path.join(__dirname, '..', 'resources', 'yt-dlp.exe');
-  if (fs.existsSync(devPath)) return devPath;
-  return 'yt-dlp';
-}
-
-// Helper to get ffmpeg path
-function getFfmpegPath() {
-  if (process.resourcesPath) {
-    const bundledPath = path.join(process.resourcesPath, 'ffmpeg.exe');
-    if (fs.existsSync(bundledPath)) return bundledPath;
-  }
-  const devPath = path.join(__dirname, '..', 'resources', 'ffmpeg.exe');
-  if (fs.existsSync(devPath)) return devPath;
-  return 'ffmpeg';
-}
-
 // IPC handlers
 ipcMain.on('download-url', async (event, url) => {
   try {
+    // Validate URL
+    if (!url || !url.includes('soundcloud.com')) {
+      dialog.showErrorBox('Invalid URL', 'Please enter a valid SoundCloud URL.');
+      return;
+    }
+
     // Check if it's a playlist
     const isPlaylist = url.includes('/sets/');
 
@@ -752,21 +746,8 @@ ipcMain.on('fetch-playlist-metadata', async (event, url) => {
   try {
     console.log(`Fetching metadata for playlist: ${url}`);
 
-    // Get yt-dlp path (bundled or system)
-    let ytdlpPath = 'yt-dlp';
-    if (process.resourcesPath) {
-      const bundledPath = path.join(process.resourcesPath, 'yt-dlp.exe');
-      if (fs.existsSync(bundledPath)) {
-        ytdlpPath = `"${bundledPath}"`;
-      }
-    } else {
-      const devPath = path.join(__dirname, '..', 'resources', 'yt-dlp.exe');
-      if (fs.existsSync(devPath)) {
-        ytdlpPath = `"${devPath}"`;
-      }
-    }
-
-    const command = `${ytdlpPath} --dump-json --flat-playlist --playlist-items 1 "${url}"`;
+    const ytdlpPath = getYtDlpPath();
+    const command = `"${ytdlpPath}" --dump-json --flat-playlist --playlist-items 1 "${url}"`;
 
     const { stdout } = await execPromise(command, {
       timeout: 10000,

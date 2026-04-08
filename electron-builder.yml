@@ -19,5 +19,5 @@ nsis:
   installerIcon: assets/icon.ico
 publish:
   provider: github
-  owner: JG2547
+  owner: HIGH-TEXAS-LIST
   repo: sc-auto-downloader

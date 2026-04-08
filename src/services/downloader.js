@@ -4,52 +4,7 @@ const path = require('path');
 const { exec, spawn } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
-
-/**
- * Get the path to yt-dlp executable
- * Checks bundled version first, then falls back to system PATH
- */
-function getYtDlpPath() {
-  // Check for bundled yt-dlp in resources folder (packaged app)
-  if (process.resourcesPath) {
-    const bundledPath = path.join(process.resourcesPath, 'yt-dlp.exe');
-    if (fs.existsSync(bundledPath)) {
-      return bundledPath;
-    }
-  }
-
-  // Check for bundled yt-dlp in development mode
-  const devPath = path.join(__dirname, '..', '..', 'resources', 'yt-dlp.exe');
-  if (fs.existsSync(devPath)) {
-    return devPath;
-  }
-
-  // Fall back to system PATH
-  return 'yt-dlp';
-}
-
-/**
- * Get the path to ffmpeg directory
- * Checks bundled version first, then falls back to system PATH
- */
-function getFfmpegPath() {
-  // Check for bundled ffmpeg in resources folder (packaged app)
-  if (process.resourcesPath) {
-    const bundledPath = path.join(process.resourcesPath, 'ffmpeg.exe');
-    if (fs.existsSync(bundledPath)) {
-      return process.resourcesPath;
-    }
-  }
-
-  // Check for bundled ffmpeg in development mode
-  const devPath = path.join(__dirname, '..', '..', 'resources', 'ffmpeg.exe');
-  if (fs.existsSync(devPath)) {
-    return path.join(__dirname, '..', '..', 'resources');
-  }
-
-  // Return null if not found (yt-dlp will use system PATH)
-  return null;
-}
+const { getYtDlpPath, getFfmpegPath } = require('./paths');
 
 class Downloader {
   constructor(store) {
@@ -345,6 +300,23 @@ class Downloader {
   }
 
   /**
+   * Compare yt-dlp version strings numerically (e.g. "2024.01.02" vs "2024.1.2.1")
+   */
+  isNewerVersion(latest, current) {
+    if (!latest || !current || latest === current) return false;
+    const a = latest.split('.').map(Number);
+    const b = current.split('.').map(Number);
+    const len = Math.max(a.length, b.length);
+    for (let i = 0; i < len; i++) {
+      const av = a[i] || 0;
+      const bv = b[i] || 0;
+      if (av > bv) return true;
+      if (av < bv) return false;
+    }
+    return false;
+  }
+
+  /**
    * Check if yt-dlp is installed
    */
   async checkYtDlp() {
@@ -395,8 +367,8 @@ class Downloader {
         downloadUrl = exeAsset.browser_download_url;
       }
 
-      // Compare versions (format: YYYY.MM.DD or YYYY.MM.DD.N)
-      const updateAvailable = latestVersion !== currentVersion && latestVersion > currentVersion;
+      // Compare versions numerically (format: YYYY.MM.DD or YYYY.MM.DD.N)
+      const updateAvailable = this.isNewerVersion(latestVersion, currentVersion);
 
       return {
         updateAvailable,
