@@ -6,11 +6,40 @@ const util = require('util');
 const execPromise = util.promisify(exec);
 const { getYtDlpPath, getFfmpegPath } = require('./paths');
 
+// yt-dlp args that make every download resilient to transient network failures
+// and SoundCloud rate limiting. Kept in one place so monitor + one-off downloads
+// behave consistently.
+const YTDLP_NETWORK_ARGS = [
+  '--retries', '10',
+  '--retry-sleep', 'http:exp=1:30',
+  '--retry-sleep', 'extractor:5',
+  '--socket-timeout', '30',
+  '--sleep-requests', '1',
+  '--sleep-interval', '2',
+  '--max-sleep-interval', '6'
+];
+
+const RATE_LIMIT_PATTERNS = [
+  'HTTP Error 429',
+  'Too Many Requests',
+  'rate-limit',
+  'rate limit'
+];
+
+function isRateLimitMessage(text) {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return RATE_LIMIT_PATTERNS.some(p => lower.includes(p.toLowerCase()));
+}
+
 class Downloader {
   constructor(store) {
     this.store = store || null;
     this.downloadQueue = [];
     this.isProcessing = false;
+    // Cooldown until epoch-ms; set when a 429 is detected so the queue pauses
+    // before issuing the next request.
+    this.cooldownUntil = 0;
   }
 
   /**
@@ -118,7 +147,9 @@ class Downloader {
       };
     } catch (error) {
       console.error('Download failed:', error);
-      throw new Error(`Failed to download track: ${error.message}`);
+      const wrapped = new Error(`Failed to download track: ${error.message}`);
+      if (error.rateLimited) wrapped.rateLimited = true;
+      throw wrapped;
     }
   }
 
@@ -154,6 +185,7 @@ class Downloader {
     const skipThumbnail = this.store ? this.store.get('skipThumbnail', false) : false;
 
     const args = [
+      ...YTDLP_NETWORK_ARGS,
       '--extract-audio',
       '--audio-format', 'mp3',
       '--audio-quality', '0',
@@ -256,6 +288,7 @@ class Downloader {
           });
         } else {
           let errorMessage = stderr || `yt-dlp exited with code ${code}`;
+          let rateLimited = false;
 
           if (stderr.includes('EPERM') || stderr.includes('Permission denied')) {
             errorMessage = `Permission denied: Cannot write files to the download folder. Try choosing a different folder or running as Administrator.`;
@@ -265,11 +298,19 @@ class Downloader {
             errorMessage = `Invalid URL: The SoundCloud URL could not be processed. Make sure the track/playlist is public and the URL is correct.`;
           } else if (stderr.includes('HTTP Error 404')) {
             errorMessage = `Track not found: The URL may be invalid or the track may have been removed.`;
-          } else if (stderr.includes('HTTP Error 429')) {
-            errorMessage = `Rate limited: Too many requests to SoundCloud. Please wait a few minutes and try again.`;
+          } else if (isRateLimitMessage(stderr)) {
+            errorMessage = `Rate limited: Too many requests to SoundCloud. Cooling down before next download.`;
+            rateLimited = true;
+            // 90s cooldown — yt-dlp already retried internally with backoff, so
+            // a longer pause before any further request is warranted.
+            this.cooldownUntil = Date.now() + 90 * 1000;
+          } else if (stderr.includes('Connection') || stderr.includes('timed out') || stderr.includes('ETIMEDOUT') || stderr.includes('ECONNRESET')) {
+            errorMessage = `Network error: ${stderr.trim().split('\n').slice(-1)[0] || 'connection failed'}. Will retry on next sync.`;
           }
 
-          reject(new Error(errorMessage));
+          const err = new Error(errorMessage);
+          if (rateLimited) err.rateLimited = true;
+          reject(err);
         }
       });
     });
@@ -282,17 +323,29 @@ class Downloader {
     }
 
     this.isProcessing = true;
+
+    // Honor any pending cooldown from a prior 429 before pulling next job.
+    const waitMs = this.cooldownUntil - Date.now();
+    if (waitMs > 0) {
+      console.warn(`Cooldown active, waiting ${Math.ceil(waitMs / 1000)}s before next download...`);
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+
     const { track, downloadPath, resolve, reject } = this.downloadQueue.shift();
 
+    let nextDelayMs = 1500; // baseline spacing between tracks
     try {
       const result = await this.downloadSingleTrack(track.url, downloadPath);
       resolve(result);
     } catch (error) {
+      if (error.rateLimited) {
+        // Already set cooldownUntil in close handler; nothing more to do here.
+        nextDelayMs = 0;
+      }
       reject(error);
     }
 
-    // Process next item with reduced delay
-    setTimeout(() => this.processQueue(), 500);
+    setTimeout(() => this.processQueue(), nextDelayMs);
   }
 
   sanitizeFilename(filename) {
