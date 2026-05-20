@@ -1042,28 +1042,75 @@
       }
     }
 
+    // Build a `.list-item` node without using innerHTML, so values supplied by
+    // the user (usernames, playlist URLs, playlist titles) cannot inject markup.
+    function createListItem({ title, subtitle, marginBottom, removeHandler, datasetUrl }) {
+      const item = document.createElement('div');
+      item.className = 'list-item';
+      if (marginBottom) item.style.marginBottom = marginBottom;
+      if (datasetUrl != null) item.dataset.url = datasetUrl;
+
+      const info = document.createElement('div');
+      info.className = 'item-info';
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'item-title';
+      titleEl.textContent = title;
+
+      const subEl = document.createElement('div');
+      subEl.className = 'item-sub';
+      subEl.textContent = subtitle;
+
+      info.appendChild(titleEl);
+      info.appendChild(subEl);
+      item.appendChild(info);
+
+      if (removeHandler) {
+        const btn = document.createElement('button');
+        btn.className = 'btn-danger btn-sm';
+        btn.textContent = 'Remove';
+        btn.addEventListener('click', () => removeHandler(btn));
+        item.appendChild(btn);
+      }
+
+      return item;
+    }
+
     function updateDashboardSources() {
       const users = settings.monitoredUsers || [];
       const playlists = settings.monitoredPlaylists || [];
       const el = document.getElementById('dashboardSources');
 
+      // Reset container safely.
+      while (el.firstChild) el.removeChild(el.firstChild);
+
       if (users.length === 0 && playlists.length === 0) {
-        el.innerHTML = '<span style="color: #475569; font-size: 12px;">No sources configured. Go to Monitoring to add users or playlists.</span>';
+        const empty = document.createElement('span');
+        empty.style.color = '#475569';
+        empty.style.fontSize = '12px';
+        empty.textContent = 'No sources configured. Go to Monitoring to add users or playlists.';
+        el.appendChild(empty);
         document.getElementById('statMonitoring').textContent = 'Off';
         document.getElementById('statMonitoringSub').textContent = 'No sources';
         return;
       }
 
-      let html = '';
       users.forEach(u => {
-        html += `<div class="list-item" style="margin-bottom: 4px;"><div class="item-info"><div class="item-title">${u}</div><div class="item-sub">User likes</div></div></div>`;
+        el.appendChild(createListItem({
+          title: u,
+          subtitle: 'User likes',
+          marginBottom: '4px'
+        }));
       });
       playlists.forEach(p => {
-        const parts = p.split('/');
+        const parts = String(p).split('/');
         const name = (parts[5] || 'playlist').replace(/-/g, ' ');
-        html += `<div class="list-item" style="margin-bottom: 4px;"><div class="item-info"><div class="item-title">${name}</div><div class="item-sub">${p}</div></div></div>`;
+        el.appendChild(createListItem({
+          title: name,
+          subtitle: p,
+          marginBottom: '4px'
+        }));
       });
-      el.innerHTML = html;
 
       const total = users.length + playlists.length;
       document.getElementById('statMonitoring').textContent = `${total}`;
@@ -1122,16 +1169,12 @@
     // ── User Management ──
     function addUserItem(username) {
       const usersList = document.getElementById('usersList');
-      const div = document.createElement('div');
-      div.className = 'list-item';
-      div.innerHTML = `
-        <div class="item-info">
-          <div class="item-title">${username}</div>
-          <div class="item-sub">soundcloud.com/${username}/likes</div>
-        </div>
-        <button class="btn-danger btn-sm" onclick="removeUser(this, '${username}')">Remove</button>
-      `;
-      usersList.appendChild(div);
+      const item = createListItem({
+        title: username,
+        subtitle: `soundcloud.com/${username}/likes`,
+        removeHandler: (btn) => removeUser(btn, username)
+      });
+      usersList.appendChild(item);
     }
 
     function addUser() {
@@ -1169,31 +1212,27 @@
       if (!url) return;
 
       const playlistsList = document.getElementById('playlistsList');
-      const div = document.createElement('div');
-      div.className = 'list-item';
-      div.dataset.url = url;
 
       // Parse display name from URL
-      const parts = url.split('/');
+      const parts = String(url).split('/');
       const user = parts[3] || 'Unknown';
       const playlistSlug = parts[5] || 'Unknown';
       const playlistName = playlistSlug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
-      div.innerHTML = `
-        <div class="item-info">
-          <div class="item-title">${playlistName} - ${user}</div>
-          <div class="item-sub">${url}</div>
-        </div>
-        <button class="btn-danger btn-sm" onclick="removePlaylist(this)">Remove</button>
-      `;
-      playlistsList.appendChild(div);
+      const item = createListItem({
+        title: `${playlistName} - ${user}`,
+        subtitle: url,
+        datasetUrl: url,
+        removeHandler: (btn) => removePlaylist(btn)
+      });
+      playlistsList.appendChild(item);
 
       // Try to fetch real metadata in background
       try {
         const metadata = await fetchPlaylistMetadata(url);
         const title = metadata.title || playlistName;
         const uploader = metadata.uploader || user;
-        div.querySelector('.item-title').textContent = `${title} - ${uploader}`;
+        item.querySelector('.item-title').textContent = `${title} - ${uploader}`;
       } catch (e) {
         // keep URL-parsed name
       }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { execSync, spawn } = require('child_process');
+const { execSync, execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
@@ -79,7 +79,7 @@ async function runDiagnostics() {
   process.stdout.write('  Testing yt-dlp... ');
   try {
     const ytdlp = getYtDlpPath();
-    const version = execSync(`"${ytdlp}" --version`, { encoding: 'utf8', timeout: 10000 }).trim();
+    const version = execFileSync(ytdlp, ['--version'], { encoding: 'utf8', timeout: 10000 }).trim();
     logStatus('yt-dlp', 'pass', `v${version}`);
     passed++;
   } catch (e) {
@@ -91,7 +91,7 @@ async function runDiagnostics() {
   process.stdout.write('  Testing ffmpeg... ');
   try {
     const ffmpeg = getFfmpegPath();
-    execSync(`"${ffmpeg}" -version`, { encoding: 'utf8', timeout: 10000 });
+    execFileSync(ffmpeg, ['-version'], { encoding: 'utf8', timeout: 10000 });
     logStatus('ffmpeg', 'pass', 'Available');
     passed++;
   } catch (e) {
@@ -120,11 +120,11 @@ async function runDiagnostics() {
   process.stdout.write('  Testing SoundCloud connection... ');
   try {
     const ytdlp = getYtDlpPath();
-    execSync(`"${ytdlp}" --flat-playlist --playlist-items 1 -j "https://soundcloud.com/discover"`, {
-      encoding: 'utf8',
-      timeout: 30000,
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
+    execFileSync(
+      ytdlp,
+      ['--flat-playlist', '--playlist-items', '1', '-j', 'https://soundcloud.com/discover'],
+      { encoding: 'utf8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] }
+    );
     logStatus('SoundCloud', 'pass', 'Connected');
     passed++;
   } catch (e) {

@@ -2,13 +2,61 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, powerSaveBlocker
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
-const { exec } = require('child_process');
-const util = require('util');
-const execPromise = util.promisify(exec);
+const { spawn } = require('child_process');
 const Store = require('electron-store');
 const SoundCloudMonitor = require('./services/soundcloud-monitor');
 const Downloader = require('./services/downloader');
 const { getYtDlpPath, getFfmpegPath } = require('./services/paths');
+
+// Run an executable with an argv array (no shell). Returns {stdout, stderr}
+// on exit 0; rejects with an Error that carries .stdout/.stderr/.code on any
+// non-zero exit, spawn failure, or timeout. Keeps argv strictly separated from
+// the command string so user-supplied values cannot be interpreted as shell
+// metacharacters.
+function runCmd(file, args, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    const proc = spawn(file, args, { windowsHide: true });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGTERM');
+    }, timeoutMs);
+
+    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      err.stdout = stdout;
+      err.stderr = stderr;
+      reject(err);
+    });
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        const err = new Error(`Command timed out after ${timeoutMs}ms`);
+        err.stdout = stdout;
+        err.stderr = stderr;
+        err.code = code;
+        reject(err);
+        return;
+      }
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const err = new Error(stderr.trim() || `Process exited with code ${code}`);
+        err.stdout = stdout;
+        err.stderr = stderr;
+        err.code = code;
+        reject(err);
+      }
+    });
+  });
+}
 
 // Initialize persistent storage
 const store = new Store();
@@ -678,7 +726,7 @@ ipcMain.on('run-diagnostics', async (event) => {
   event.reply('diagnostic-update', { test: 'ytdlp', status: 'running', message: 'Checking yt-dlp...' });
   try {
     const ytdlpPath = getYtDlpPath();
-    const { stdout } = await execPromise(`"${ytdlpPath}" --version`, { timeout: 10000 });
+    const { stdout } = await runCmd(ytdlpPath, ['--version'], 10000);
     const version = stdout.trim();
     event.reply('diagnostic-update', { test: 'ytdlp', status: 'pass', message: `yt-dlp ${version} installed` });
     passed++;
@@ -690,8 +738,11 @@ ipcMain.on('run-diagnostics', async (event) => {
   // Test 2: ffmpeg
   event.reply('diagnostic-update', { test: 'ffmpeg', status: 'running', message: 'Checking ffmpeg...' });
   try {
-    const ffmpegPath = getFfmpegPath();
-    await execPromise(`"${ffmpegPath}" -version`, { timeout: 10000 });
+    // getFfmpegPath() returns the directory containing ffmpeg.exe (or null);
+    // resolve to the actual binary so it's executable directly without a shell.
+    const ffmpegDir = getFfmpegPath();
+    const ffmpegBin = ffmpegDir ? path.join(ffmpegDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg') : 'ffmpeg';
+    await runCmd(ffmpegBin, ['-version'], 10000);
     event.reply('diagnostic-update', { test: 'ffmpeg', status: 'pass', message: 'ffmpeg is available' });
     passed++;
   } catch (error) {
@@ -719,7 +770,7 @@ ipcMain.on('run-diagnostics', async (event) => {
   event.reply('diagnostic-update', { test: 'soundcloud', status: 'running', message: 'Connecting to SoundCloud...' });
   try {
     const ytdlpPath = getYtDlpPath();
-    await execPromise(`"${ytdlpPath}" --flat-playlist --playlist-items 1 -j "https://soundcloud.com/discover"`, { timeout: 30000 });
+    await runCmd(ytdlpPath, ['--flat-playlist', '--playlist-items', '1', '-j', 'https://soundcloud.com/discover'], 30000);
     event.reply('diagnostic-update', { test: 'soundcloud', status: 'pass', message: 'Connected to SoundCloud successfully' });
     passed++;
   } catch (error) {
@@ -744,15 +795,26 @@ ipcMain.on('run-diagnostics', async (event) => {
 
 ipcMain.on('fetch-playlist-metadata', async (event, url) => {
   try {
+    // url comes from the renderer (user-supplied playlist URL). Validate
+    // shape, then pass as an argv element so it can't be parsed as a shell
+    // metacharacter sequence by any layer below us.
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url) || !url.includes('soundcloud.com')) {
+      event.reply('playlist-metadata-result', {
+        success: false,
+        url,
+        error: 'Invalid playlist URL'
+      });
+      return;
+    }
+
     console.log(`Fetching metadata for playlist: ${url}`);
 
     const ytdlpPath = getYtDlpPath();
-    const command = `"${ytdlpPath}" --dump-json --flat-playlist --playlist-items 1 "${url}"`;
-
-    const { stdout } = await execPromise(command, {
-      timeout: 10000,
-      maxBuffer: 1024 * 1024
-    });
+    const { stdout } = await runCmd(
+      ytdlpPath,
+      ['--dump-json', '--flat-playlist', '--playlist-items', '1', url],
+      10000
+    );
 
     if (stdout) {
       const data = JSON.parse(stdout.trim().split('\n')[0]);
