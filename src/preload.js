@@ -7,7 +7,8 @@ contextBridge.exposeInMainWorld('api', {
       'get-settings', 'save-settings', 'get-status',
       'choose-folder', 'test-sync',
       'check-ytdlp-update', 'update-ytdlp', 'get-ytdlp-version',
-      'run-diagnostics', 'fetch-playlist-metadata', 'download-url'
+      'run-diagnostics', 'fetch-playlist-metadata', 'download-url',
+      'check-app-update', 'download-app-update', 'install-app-update'
     ];
     if (allowed.includes(channel)) {
       ipcRenderer.send(channel, data);
@@ -22,7 +23,8 @@ contextBridge.exposeInMainWorld('api', {
       'ytdlp-update-info', 'ytdlp-update-progress', 'ytdlp-update-result',
       'ytdlp-version',
       'diagnostic-update', 'diagnostic-complete',
-      'playlist-metadata-result'
+      'playlist-metadata-result',
+      'app-update-info', 'app-update-download-started'
     ];
     if (allowed.includes(channel)) {
       const sub = (event, ...args) => callback(...args);

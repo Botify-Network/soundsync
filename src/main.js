@@ -68,6 +68,13 @@ let downloader = null;
 let powerSaveId = null;
 let isSyncing = false;
 
+// Pull current updater toggles from the store onto the electron-updater
+// singleton. Safe to call repeatedly (e.g. after save-settings).
+function applyAutoUpdaterSettings() {
+  autoUpdater.autoDownload = store.get('autoUpdate', true);
+  autoUpdater.autoInstallOnAppQuit = store.get('autoInstallOnQuit', true);
+}
+
 // Prevent system sleep during active operations
 function blockSleep() {
   if (powerSaveId === null) {
@@ -90,7 +97,10 @@ let appStatus = {
   currentActivity: 'Idle',
   syncStatus: 'Ready',
   lastSync: null,
-  downloadCount: 0
+  downloadCount: 0,
+  // Populated by autoUpdater event handlers. null = no pending update.
+  // Otherwise: { version, downloaded: bool }.
+  updateAvailable: null
 };
 
 // Prevent multiple instances
@@ -625,6 +635,8 @@ ipcMain.on('get-settings', (event) => {
     syncInterval: store.get('syncInterval', 15),
     autoStart: store.get('autoStart', false),
     skipThumbnail: store.get('skipThumbnail', false),
+    autoUpdate: store.get('autoUpdate', true),
+    autoInstallOnQuit: store.get('autoInstallOnQuit', true),
     monitoredUsers: store.get('monitoredUsers', []),
     monitoredPlaylists: store.get('monitoredPlaylists', [])
   });
@@ -642,8 +654,14 @@ ipcMain.on('save-settings', (event, settings) => {
   store.set('syncInterval', settings.syncInterval);
   store.set('autoStart', settings.autoStart);
   store.set('skipThumbnail', settings.skipThumbnail || false);
+  if (typeof settings.autoUpdate === 'boolean') store.set('autoUpdate', settings.autoUpdate);
+  if (typeof settings.autoInstallOnQuit === 'boolean') store.set('autoInstallOnQuit', settings.autoInstallOnQuit);
   store.set('monitoredUsers', settings.monitoredUsers);
   store.set('monitoredPlaylists', settings.monitoredPlaylists);
+
+  // Re-apply updater toggles immediately so the change takes effect without
+  // requiring a restart.
+  applyAutoUpdaterSettings();
 
   // Handle auto-start
   if (settings.autoStart) {
@@ -706,6 +724,38 @@ ipcMain.on('update-ytdlp', async (event) => {
   } catch (error) {
     event.reply('ytdlp-update-result', { success: false, error: error.message });
   }
+});
+
+// Manual app-update controls. Independent of the autoUpdate setting so users
+// can check on demand even when automatic checks are disabled.
+ipcMain.on('check-app-update', async (event) => {
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const info = result && result.updateInfo;
+    event.reply('app-update-info', {
+      updateAvailable: !!(info && info.version && info.version !== app.getVersion()),
+      version: info ? info.version : null,
+      currentVersion: app.getVersion()
+    });
+  } catch (error) {
+    event.reply('app-update-info', { error: error.message, currentVersion: app.getVersion() });
+  }
+});
+
+ipcMain.on('download-app-update', async (event) => {
+  try {
+    // Force download even if autoDownload is off.
+    await autoUpdater.downloadUpdate();
+    event.reply('app-update-download-started', { success: true });
+  } catch (error) {
+    event.reply('app-update-download-started', { success: false, error: error.message });
+  }
+});
+
+ipcMain.on('install-app-update', () => {
+  // quitAndInstall() restarts the app via the installer. No reply — the
+  // process is about to exit.
+  try { autoUpdater.quitAndInstall(); } catch (e) { console.error('quitAndInstall failed:', e.message); }
 });
 
 ipcMain.on('get-ytdlp-version', async (event) => {
@@ -919,35 +969,64 @@ app.whenReady().then(() => {
     }
   }, 5000); // Check 5 seconds after startup
 
-  // Auto-updater: check for app updates from GitHub Releases
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Auto-updater: configurable. Defaults preserve prior behavior (auto-check,
+  // auto-download, auto-install on quit) but are now user-toggleable.
+  // - autoUpdate=false → no startup check, no auto-download. Manual "Check for
+  //   updates" IPC still works and surfaces update info without downloading.
+  // - autoInstallOnQuit=false → downloaded update is NOT silently applied on
+  //   next quit; user must click "Install now" (which calls quitAndInstall).
+  applyAutoUpdaterSettings();
 
   autoUpdater.on('update-available', (info) => {
     console.log('App update available:', info.version);
+    appStatus.updateAvailable = { version: info.version, downloaded: false };
+    const willDownload = autoUpdater.autoDownload;
     tray.displayBalloon({
       title: 'Update Available',
-      content: `Version ${info.version} is downloading in the background.`
+      content: willDownload
+        ? `Version ${info.version} is downloading in the background.`
+        : `Version ${info.version} is available. Open Settings to install.`
     });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    console.log('App is up to date:', info && info.version);
+    appStatus.updateAvailable = null;
   });
 
   autoUpdater.on('update-downloaded', (info) => {
     console.log('App update downloaded:', info.version);
+    appStatus.updateAvailable = { version: info.version, downloaded: true };
+    const willAutoInstall = autoUpdater.autoInstallOnAppQuit;
     tray.displayBalloon({
       title: 'Update Ready',
-      content: `Version ${info.version} will be installed on next restart.`
+      content: willAutoInstall
+        ? `Version ${info.version} will be installed on next restart.`
+        : `Version ${info.version} downloaded. Open Settings to install now, or it will wait until you choose.`
     });
   });
 
   autoUpdater.on('error', (err) => {
-    console.log('Auto-updater error:', err.message);
+    console.log('Auto-updater error:', err && err.message);
+    // Surface to the user — prior code swallowed this to the console only,
+    // which made silent-failure modes invisible.
+    if (tray) {
+      tray.displayBalloon({
+        title: 'Update Check Failed',
+        content: (err && err.message) ? err.message.slice(0, 200) : 'Unknown error'
+      });
+    }
   });
 
-  setTimeout(() => {
-    autoUpdater.checkForUpdatesAndNotify().catch(err => {
-      console.log('Update check failed:', err.message);
-    });
-  }, 10000);
+  if (store.get('autoUpdate', true)) {
+    setTimeout(() => {
+      autoUpdater.checkForUpdatesAndNotify().catch(err => {
+        console.log('Update check failed:', err.message);
+      });
+    }, 10000);
+  } else {
+    console.log('Auto-update is disabled. Skipping startup check.');
+  }
 
   // Don't show window on start - run in background
   app.dock?.hide(); // Hide dock icon on macOS

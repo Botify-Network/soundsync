@@ -788,6 +788,46 @@
               </div>
             </div>
           </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>App Updates</h3>
+            </div>
+            <div class="card-body">
+              <div class="toggle-row">
+                <div class="toggle-info">
+                  <div class="toggle-label">Check for updates automatically</div>
+                  <div class="toggle-desc">Check GitHub Releases at startup and download new versions in the background</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="autoUpdate">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <div class="toggle-row">
+                <div class="toggle-info">
+                  <div class="toggle-label">Install updates on next restart</div>
+                  <div class="toggle-desc">Apply downloaded updates silently when you quit the app. Off = wait for you to click Install.</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="autoInstallOnQuit">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <div class="toggle-row">
+                <div class="toggle-info">
+                  <div class="toggle-label">Current version</div>
+                  <div class="toggle-desc" id="appUpdateStatus">Click "Check for updates" to query GitHub Releases.</div>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                  <button class="btn-ghost btn-sm" id="appUpdateCheckBtn" onclick="checkAppUpdate()">Check for updates</button>
+                  <button class="btn-primary btn-sm" id="appUpdateInstallBtn" onclick="installAppUpdate()" style="display: none;">Install now</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Monitoring Page -->
@@ -998,6 +1038,8 @@
       document.getElementById('autoStart').checked = settings.autoStart;
       document.getElementById('autoSync').checked = settings.autoSync;
       document.getElementById('skipThumbnail').checked = settings.skipThumbnail || false;
+      document.getElementById('autoUpdate').checked = settings.autoUpdate !== false;
+      document.getElementById('autoInstallOnQuit').checked = settings.autoInstallOnQuit !== false;
 
       // Populate users
       const usersList = document.getElementById('usersList');
@@ -1315,6 +1357,8 @@
         autoStart: document.getElementById('autoStart').checked,
         autoSync: document.getElementById('autoSync').checked,
         skipThumbnail: document.getElementById('skipThumbnail').checked,
+        autoUpdate: document.getElementById('autoUpdate').checked,
+        autoInstallOnQuit: document.getElementById('autoInstallOnQuit').checked,
         monitoredUsers: settings.monitoredUsers || [],
         monitoredPlaylists: settings.monitoredPlaylists || []
       };
@@ -1338,6 +1382,50 @@
       window.api.send('test-sync');
       showToast('Starting sync...');
     }
+
+    // ── App update controls ──
+    function checkAppUpdate() {
+      const btn = document.getElementById('appUpdateCheckBtn');
+      const status = document.getElementById('appUpdateStatus');
+      btn.disabled = true;
+      status.textContent = 'Checking GitHub Releases...';
+      window.api.send('check-app-update');
+    }
+
+    function installAppUpdate() {
+      if (!confirm('Quit the app and install the update now?')) return;
+      window.api.send('install-app-update');
+    }
+
+    window.api.on('app-update-info', (info) => {
+      const btn = document.getElementById('appUpdateCheckBtn');
+      const installBtn = document.getElementById('appUpdateInstallBtn');
+      const status = document.getElementById('appUpdateStatus');
+      btn.disabled = false;
+
+      if (info.error) {
+        status.textContent = `Check failed: ${info.error}`;
+        installBtn.style.display = 'none';
+        return;
+      }
+
+      if (info.updateAvailable) {
+        status.textContent = `Update available: v${info.version} (current v${info.currentVersion})`;
+        installBtn.style.display = '';
+        // Trigger download so quitAndInstall has something to install.
+        window.api.send('download-app-update');
+      } else {
+        status.textContent = `Up to date (v${info.currentVersion})`;
+        installBtn.style.display = 'none';
+      }
+    });
+
+    window.api.on('app-update-download-started', (result) => {
+      const status = document.getElementById('appUpdateStatus');
+      if (!result.success) {
+        status.textContent = `Download failed: ${result.error}`;
+      }
+    });
 
     window.api.on('test-sync-complete', (result) => {
       showToast(result.success ? 'Sync completed' : 'Sync failed: ' + result.error);
