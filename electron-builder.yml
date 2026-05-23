@@ -20,5 +20,5 @@ nsis:
   shortcutName: SoundSync
 publish:
   provider: github
-  owner: HIGH-TEXAS-LIST
-  repo: sc-auto-downloader
+  owner: Botify-Network
+  repo: soundsync

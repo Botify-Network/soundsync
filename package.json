@@ -1,6 +1,6 @@
 {
   "name": "soundsync",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "SoundSync by Botify - Automatically sync and download SoundCloud likes and playlists.",
   "main": "src/main.js",
   "bin": {

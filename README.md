@@ -23,8 +23,8 @@
 
 Install via the released NSIS installer published on GitHub:
 
-- Releases: https://github.com/HIGH-TEXAS-LIST/sc-auto-downloader/releases
-- Current release: [v2.0.6](https://github.com/HIGH-TEXAS-LIST/sc-auto-downloader/releases/tag/v2.0.6)
+- Releases: https://github.com/Botify-Network/soundsync/releases
+- Current release: [v2.0.6](https://github.com/Botify-Network/soundsync/releases/tag/v2.0.6)
 
 ### Important — auto-updater artifact requirement
 
