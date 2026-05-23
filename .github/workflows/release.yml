@@ -1,0 +1,105 @@
+name: Release SoundSync by Botify
+
+# Triggers on semver tags only. The companion verify-release-artifacts.js
+# script runs before publish and refuses empty/invalid release artifact
+# sets, so the workflow cannot accidentally publish a hollow release.
+#
+# Outputs are consumed by the Botify Network download broker at
+# https://botify-network.com/downloads/soundsync/latest — that service
+# streams these GitHub-hosted assets through botify-network.com so the
+# public website never exposes Botify-Network/soundsync URLs.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to publish (e.g. v2.0.8). Must match package.json."
+        required: true
+
+permissions:
+  # Need write to create the release + upload artifacts. Repo stays
+  # private; the workflow does not publish Pages and does not flip
+  # visibility.
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build + publish Windows release
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source at tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify repo visibility is private
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          visibility=$(gh repo view "${GITHUB_REPOSITORY}" --json visibility --jq '.visibility')
+          echo "repo visibility: ${visibility}"
+          if [ "${visibility}" != "PRIVATE" ]; then
+            echo "::error::Repo is not PRIVATE (got ${visibility}). Refusing to publish a release into a public repo because the public website assumes private-broker semantics."
+            exit 1
+          fi
+
+      - name: Build Windows installer
+        env:
+          # electron-builder reads GH_TOKEN for publish=github releases.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build:win
+
+      - name: Verify release artifacts before publish
+        shell: bash
+        run: node scripts/verify-release-artifacts.js
+
+      - name: Upload artifacts to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pick the tag the workflow ran for. push-tag events provide
+          # GITHUB_REF_NAME; workflow_dispatch uses the input.
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "publishing tag: ${TAG}"
+
+          # electron-builder may have already created the release. If
+          # it has, this gh release create call falls through and we
+          # only upload missing assets. If it has not, we create it.
+          gh release view "${TAG}" >/dev/null 2>&1 || \
+            gh release create "${TAG}" \
+              --title "SoundSync by Botify ${TAG}" \
+              --notes "Private release. Distributed via the Botify Network download broker at https://botify-network.com/downloads/soundsync/latest. See the broker README for the supported endpoints."
+
+          # Upload installer + metadata. --clobber lets the workflow be
+          # re-run safely without orphaning prior asset versions.
+          shopt -s nullglob
+          for f in \
+            dist/*.exe \
+            dist/*.blockmap \
+            dist/latest*.yml \
+            dist/*.sha256 \
+            dist/*-manifest.json; do
+            echo "uploading ${f}"
+            gh release upload "${TAG}" "${f}" --clobber
+          done
