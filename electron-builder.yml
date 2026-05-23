@@ -1,5 +1,5 @@
-appId: com.scautosync.app
-productName: SoundCloud Auto Sync
+appId: com.botify.soundsync
+productName: SoundSync
 directories:
   output: dist
 files:
@@ -17,6 +17,7 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   installerIcon: assets/icon.ico
+  shortcutName: SoundSync
 publish:
   provider: github
   owner: HIGH-TEXAS-LIST

@@ -4,7 +4,15 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
-const CONFIG_PATH = path.join(process.env.APPDATA || '', 'soundcloud-auto-sync', 'config.json');
+const NEW_CONFIG_PATH = path.join(process.env.APPDATA || '', 'soundsync', 'config.json');
+const LEGACY_CONFIG_PATH = path.join(process.env.APPDATA || '', 'soundcloud-auto-sync', 'config.json');
+// Read from the new SoundSync path if it exists; otherwise fall back to the
+// legacy path so existing CLI users don't lose their config across the
+// rebrand. saveConfig always writes to the new path.
+const CONFIG_READ_PATH = fs.existsSync(NEW_CONFIG_PATH)
+  ? NEW_CONFIG_PATH
+  : (fs.existsSync(LEGACY_CONFIG_PATH) ? LEGACY_CONFIG_PATH : NEW_CONFIG_PATH);
+const CONFIG_PATH = NEW_CONFIG_PATH;
 const RESOURCES_PATH = path.join(__dirname, 'resources');
 
 // Colors for terminal
@@ -33,8 +41,8 @@ function logStatus(label, status, message) {
 
 function getConfig() {
   try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    if (fs.existsSync(CONFIG_READ_PATH)) {
+      return JSON.parse(fs.readFileSync(CONFIG_READ_PATH, 'utf8'));
     }
   } catch (e) {}
   return {

@@ -8,6 +8,36 @@ const SoundCloudMonitor = require('./services/soundcloud-monitor');
 const Downloader = require('./services/downloader');
 const { getYtDlpPath, getFfmpegPath } = require('./services/paths');
 
+// Brand identity — must run before app.whenReady() so Windows uses the
+// SoundSync name for taskbar/notification grouping and the userData folder.
+app.setName('SoundSync');
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.botify.soundsync');
+}
+
+// One-time migration from the pre-rebrand userData folder so upgrading
+// users keep their electron-store settings and any other on-disk state.
+// app.setName('SoundSync') points userData at %AppData%/SoundSync; the
+// legacy build wrote to %AppData%/soundcloud-auto-sync (Electron derives
+// the default from the package.json "name" when productName is unset on
+// the app object, which is what the old build relied on).
+try {
+  const newUserData = app.getPath('userData');
+  const legacyUserData = path.join(path.dirname(newUserData), 'soundcloud-auto-sync');
+  if (!fs.existsSync(newUserData) && fs.existsSync(legacyUserData)) {
+    fs.mkdirSync(newUserData, { recursive: true });
+    for (const entry of fs.readdirSync(legacyUserData)) {
+      fs.cpSync(
+        path.join(legacyUserData, entry),
+        path.join(newUserData, entry),
+        { recursive: true, force: false, errorOnExist: false }
+      );
+    }
+  }
+} catch (e) {
+  console.error('userData migration failed:', e);
+}
+
 // Run an executable with an argv array (no shell). Returns {stdout, stderr}
 // on exit 0; rejects with an Error that carries .stdout/.stderr/.code on any
 // non-zero exit, spawn failure, or timeout. Keeps argv strictly separated from
@@ -122,7 +152,7 @@ function createTray() {
 
   updateTrayMenu();
 
-  tray.setToolTip('SoundCloud - Auto Sync/Downloader');
+  tray.setToolTip('SoundSync');
 
   tray.on('click', () => {
     if (settingsWindow) {
@@ -149,7 +179,7 @@ function updateTrayMenu() {
 
   const menuTemplate = [
     {
-      label: 'SoundCloud - Auto Sync/Downloader',
+      label: 'SoundSync',
       enabled: false
     },
     { type: 'separator' },
@@ -345,7 +375,7 @@ function createSettingsWindow() {
   settingsWindow = new BrowserWindow({
     width: 900,
     height: 650,
-    title: 'SoundCloud - Auto Sync/Downloader',
+    title: 'SoundSync',
     icon: path.join(__dirname, '../assets/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -407,7 +437,7 @@ async function syncNow() {
   appStatus.currentActivity = 'Syncing...';
   appStatus.syncStatus = 'In Progress';
   updateTrayMenu();
-  tray.setToolTip('SoundCloud - Syncing...');
+  tray.setToolTip('SoundSync — Syncing...');
   blockSleep();
 
   monitor.syncAll()
@@ -423,7 +453,7 @@ async function syncNow() {
       store.set('downloadCount', appStatus.downloadCount);
       updateTrayMenu();
 
-      tray.setToolTip('SoundCloud - Sync Complete');
+      tray.setToolTip('SoundSync — Sync Complete');
 
       if (results.downloaded > 0) {
         // Build detailed message
@@ -453,7 +483,7 @@ async function syncNow() {
       }
 
       setTimeout(() => {
-        tray.setToolTip('SoundCloud - Auto Sync/Downloader');
+        tray.setToolTip('SoundSync');
       }, 3000);
     })
     .catch((error) => {
@@ -471,7 +501,7 @@ async function syncNow() {
         title: 'Sync Error',
         content: 'Failed to sync. Check your internet connection.'
       });
-      tray.setToolTip('SoundCloud - Auto Sync/Downloader');
+      tray.setToolTip('SoundSync');
 
       // Reset operational status after 30 seconds
       setTimeout(() => {
