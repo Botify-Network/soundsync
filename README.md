@@ -135,10 +135,8 @@ Note: the CLI maintains its own config at `%APPDATA%\soundsync\config.json` (sep
 
 Premium transparent branding lives in [`assets/brand/`](assets/brand):
 
-- `SoundSync_logo_transparent_1024.png` — square logo
 - `SoundSync_transparent_banner_2048x682.png` / `_trimmed.png` — header / about banner
 - `SoundSync_taskbar_icon.ico` / `_512.png` / `_256.png` — app + taskbar / installer icon
-- `SoundSync_banner_preview_dark.png` — preview composite (not for use as a source asset)
 
 ## License
 
