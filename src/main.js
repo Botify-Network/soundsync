@@ -373,10 +373,14 @@ function createSettingsWindow() {
   }
 
   settingsWindow = new BrowserWindow({
-    width: 900,
-    height: 650,
+    width: 1040,
+    height: 740,
+    minWidth: 860,
+    minHeight: 640,
     title: 'SoundSync',
-    icon: path.join(__dirname, '../assets/icon.png'),
+    icon: path.join(__dirname, '../assets/brand/SoundSync_taskbar_icon.ico'),
+    backgroundColor: '#050b18',
+    resizable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
