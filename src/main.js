@@ -2,11 +2,12 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, powerSaveBlocker
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
 const Store = require('electron-store');
 const SoundCloudMonitor = require('./services/soundcloud-monitor');
 const Downloader = require('./services/downloader');
 const { getYtDlpPath, getFfmpegPath } = require('./services/paths');
+const { runCmd } = require('./main/run-cmd');
+const { migrateUserDataFromLegacy } = require('./main/user-data-migration');
 
 // Brand identity — must run before app.whenReady() so Windows uses the
 // SoundSync name for taskbar/notification grouping and the userData folder.
@@ -15,78 +16,8 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.botify.soundsync');
 }
 
-// One-time migration from the pre-rebrand userData folder so upgrading
-// users keep their electron-store settings and any other on-disk state.
-// app.setName('SoundSync') points userData at %AppData%/SoundSync; the
-// legacy build wrote to %AppData%/soundcloud-auto-sync (Electron derives
-// the default from the package.json "name" when productName is unset on
-// the app object, which is what the old build relied on).
-try {
-  const newUserData = app.getPath('userData');
-  const legacyUserData = path.join(path.dirname(newUserData), 'soundcloud-auto-sync');
-  if (!fs.existsSync(newUserData) && fs.existsSync(legacyUserData)) {
-    fs.mkdirSync(newUserData, { recursive: true });
-    for (const entry of fs.readdirSync(legacyUserData)) {
-      fs.cpSync(
-        path.join(legacyUserData, entry),
-        path.join(newUserData, entry),
-        { recursive: true, force: false, errorOnExist: false }
-      );
-    }
-  }
-} catch (e) {
-  console.error('userData migration failed:', e);
-}
-
-// Run an executable with an argv array (no shell). Returns {stdout, stderr}
-// on exit 0; rejects with an Error that carries .stdout/.stderr/.code on any
-// non-zero exit, spawn failure, or timeout. Keeps argv strictly separated from
-// the command string so user-supplied values cannot be interpreted as shell
-// metacharacters.
-function runCmd(file, args, timeoutMs = 30000) {
-  return new Promise((resolve, reject) => {
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    const proc = spawn(file, args, { windowsHide: true });
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      proc.kill('SIGTERM');
-    }, timeoutMs);
-
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
-
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      err.stdout = stdout;
-      err.stderr = stderr;
-      reject(err);
-    });
-
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        const err = new Error(`Command timed out after ${timeoutMs}ms`);
-        err.stdout = stdout;
-        err.stderr = stderr;
-        err.code = code;
-        reject(err);
-        return;
-      }
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        const err = new Error(stderr.trim() || `Process exited with code ${code}`);
-        err.stdout = stdout;
-        err.stderr = stderr;
-        err.code = code;
-        reject(err);
-      }
-    });
-  });
-}
+// One-time migration from the pre-rebrand userData folder.
+migrateUserDataFromLegacy(app);
 
 // Initialize persistent storage
 const store = new Store();
