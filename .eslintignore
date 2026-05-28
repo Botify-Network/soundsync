@@ -1,0 +1,8 @@
+node_modules/
+dist/
+resources/
+.claude/
+design/
+assets/
+src/assets/
+package-lock.json

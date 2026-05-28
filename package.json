@@ -16,7 +16,9 @@
     "prebuild:win": "node scripts/bump-version.js",
     "build:win": "electron-builder --win",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "author": "Botify",
   "license": "MIT",
@@ -28,6 +30,7 @@
   "devDependencies": {
     "electron": "^42.3.0",
     "electron-builder": "^26.8.1",
+    "eslint": "^8.57.0",
     "vitest": "^1.6.0"
   }
 }
