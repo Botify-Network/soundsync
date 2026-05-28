@@ -14,7 +14,9 @@
     "prebuild": "node scripts/bump-version.js",
     "build": "electron-builder",
     "prebuild:win": "node scripts/bump-version.js",
-    "build:win": "electron-builder --win"
+    "build:win": "electron-builder --win",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "author": "Botify",
   "license": "MIT",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "electron": "^42.3.0",
-    "electron-builder": "^26.8.1"
+    "electron-builder": "^26.8.1",
+    "vitest": "^1.6.0"
   }
 }
