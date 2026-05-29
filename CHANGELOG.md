@@ -14,6 +14,9 @@ All notable changes to **SoundSync by Botify** are documented here. Format loose
 ### Engineering
 - (Tracked in [#2](https://github.com/Botify-Network/soundsync/issues/2).)
 
+### Fixed
+- Diagnostics: SoundCloud connection test now hits `soundcloud.com/trending-music-us` instead of `soundcloud.com/discover`, which started returning HTTP 404 from yt-dlp's `soundcloud:user` extractor. Restores the 4/4 pass result in the Diagnostics panel.
+
 ## [2.0.7] — 2026-05-28
 
 ### Added

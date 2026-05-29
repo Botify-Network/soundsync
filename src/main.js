@@ -785,7 +785,7 @@ ipcMain.on('run-diagnostics', async (event) => {
   event.reply('diagnostic-update', { test: 'soundcloud', status: 'running', message: 'Connecting to SoundCloud...' });
   try {
     const ytdlpPath = getYtDlpPath();
-    await runCmd(ytdlpPath, ['--flat-playlist', '--playlist-items', '1', '-j', 'https://soundcloud.com/discover'], 30000);
+    await runCmd(ytdlpPath, ['--flat-playlist', '--playlist-items', '1', '-j', 'https://soundcloud.com/trending-music-us'], 30000);
     event.reply('diagnostic-update', { test: 'soundcloud', status: 'pass', message: 'Connected to SoundCloud successfully' });
     passed++;
   } catch (error) {
