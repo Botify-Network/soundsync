@@ -9,9 +9,13 @@ const { getYtDlpPath, getFfmpegPath } = require('./paths');
 // yt-dlp args that make every download resilient to transient network failures
 // and SoundCloud rate limiting. Kept in one place so monitor + one-off downloads
 // behave consistently.
+// yt-dlp internal retry count kept moderate because we now handle 403
+// auth-block recovery (cache purge + retry) ourselves at the Downloader
+// layer. 5 internal retries + 1 outer retry is plenty without blowing the
+// per-track timeout budget.
 const YTDLP_NETWORK_ARGS = [
-  '--retries', '10',
-  '--retry-sleep', 'http:exp=1:30',
+  '--retries', '5',
+  '--retry-sleep', 'http:exp=1:15',
   '--retry-sleep', 'extractor:5',
   '--socket-timeout', '30',
   '--sleep-requests', '1',
@@ -321,8 +325,16 @@ class Downloader {
 
     console.log(`Executing yt-dlp with ${args.length} arguments`);
 
-    // Set timeout based on whether it's a playlist or single track
-    const timeoutMs = isPlaylist ? 30 * 60 * 1000 : 5 * 60 * 1000;
+    // Per-track / per-playlist hard timeout. User-overridable via store so
+    // slow networks or huge playlists don't get killed mid-download.
+    const trackDefault = 12 * 60 * 1000;    // 12 min single track
+    const playlistDefault = 60 * 60 * 1000; // 60 min playlist
+    let timeoutMs = isPlaylist ? playlistDefault : trackDefault;
+    if (this.store) {
+      const cfgKey = isPlaylist ? 'playlistTimeoutMs' : 'trackTimeoutMs';
+      const cfg = Number(this.store.get(cfgKey, timeoutMs));
+      if (Number.isFinite(cfg) && cfg >= 60 * 1000) timeoutMs = cfg;
+    }
 
     const ytdlpPath = getYtDlpPath();
 
@@ -374,7 +386,13 @@ class Downloader {
         if (timeoutId) clearTimeout(timeoutId);
 
         if (isTimedOut) {
-          reject(new Error(`Download timed out. This could be due to:\n- Slow internet connection\n- Large playlist\n- Rate limiting by SoundCloud\n\nPlease try again later.`));
+          const minutes = Math.round(timeoutMs / 60000);
+          reject(new Error(
+            `Download timed out after ${minutes} min. Likely causes:\n` +
+            `- Slow connection or large file\n` +
+            `- SoundCloud rate-limiting / 403 storm\n\n` +
+            `You can raise the limit in settings: trackTimeoutMs / playlistTimeoutMs.`
+          ));
           return;
         }
 

@@ -5,6 +5,7 @@ All notable changes to **SoundSync by Botify** are documented here. Format loose
 ## [Unreleased]
 
 ### Fixed
+- "Download timed out" firing too early on big files / 403-recovery paths. Single-track timeout bumped 5 min → 12 min default; playlist 30 min → 60 min default. Both user-overridable via `trackTimeoutMs` / `playlistTimeoutMs` store keys (min 60s). yt-dlp internal retries lowered 10 → 5 and exp backoff cap 30s → 15s since the Downloader now owns 403 recovery — keeps internal retry budget under ~75s so the outer timer reflects real download time, not retry storms.
 - SoundCloud `HTTP 403 Forbidden` / `Unable to download JSON metadata` errors now auto-recover: `Downloader` detects the auth-block signature, purges the yt-dlp cache (forcing a fresh `client_id` scrape), best-effort self-updates yt-dlp (throttled to once per 6h), and transparently retries the download once. Applies to both single-track and playlist paths in `src/services/downloader.js`.
 - "Download from URL" dialog: buttons were clipped below the visible area on Windows because the window sized to 500×200 *including* the title/menu bar. Switched to `useContentSize: true`, bumped to 520×260 content, stripped the menu bar (`setMenu(null)` + `autoHideMenuBar`), and tightened body padding so Download/Cancel are always visible without scrolling.
 
