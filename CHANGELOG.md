@@ -4,6 +4,13 @@ All notable changes to **SoundSync by Botify** are documented here. Format loose
 
 ## [Unreleased]
 
+### Fixed
+- SoundCloud `HTTP 403 Forbidden` / `Unable to download JSON metadata` errors now auto-recover: `Downloader` detects the auth-block signature, purges the yt-dlp cache (forcing a fresh `client_id` scrape), best-effort self-updates yt-dlp (throttled to once per 6h), and transparently retries the download once. Applies to both single-track and playlist paths in `src/services/downloader.js`.
+- "Download from URL" dialog: buttons were clipped below the visible area on Windows because the window sized to 500×200 *including* the title/menu bar. Switched to `useContentSize: true`, bumped to 520×260 content, stripped the menu bar (`setMenu(null)` + `autoHideMenuBar`), and tightened body padding so Download/Cancel are always visible without scrolling.
+
+### Changed
+- Queued downloads are now paced with a randomized inter-track delay (default 4–12s, configurable via `interTrackDelayMinMs` / `interTrackDelayMaxMs` in user settings, hard-clamped to 1s–120s). Cuts the chance of SoundCloud rate-limiting the cached `client_id` during large playlist syncs. Skipped when the queue is empty or when a 429 cooldown is already active.
+
 ### Docs
 - Premium README rewrite with badges, architecture overview, troubleshooting, project links.
 - Created `/docs/` skeleton: operator, developer, governance, architecture, deployment, security, troubleshooting.

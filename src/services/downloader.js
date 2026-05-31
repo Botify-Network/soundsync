@@ -26,10 +26,26 @@ const RATE_LIMIT_PATTERNS = [
   'rate limit'
 ];
 
+// SoundCloud rotates its public client_id frequently. yt-dlp caches the last
+// known good value; when SoundCloud rotates, the cached id starts returning
+// 403 on the JSON metadata endpoint until the cache is purged (which forces
+// yt-dlp to re-scrape a fresh client_id from the web player).
+const AUTH_BLOCK_PATTERNS = [
+  'HTTP Error 403',
+  'Forbidden',
+  'Unable to download JSON metadata'
+];
+
 function isRateLimitMessage(text) {
   if (!text) return false;
   const lower = text.toLowerCase();
   return RATE_LIMIT_PATTERNS.some(p => lower.includes(p.toLowerCase()));
+}
+
+function isAuthBlockMessage(text) {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return AUTH_BLOCK_PATTERNS.some(p => lower.includes(p.toLowerCase()));
 }
 
 class Downloader {
@@ -40,6 +56,72 @@ class Downloader {
     // Cooldown until epoch-ms; set when a 429 is detected so the queue pauses
     // before issuing the next request.
     this.cooldownUntil = 0;
+    // Throttle automatic yt-dlp self-updates triggered by 403s so we never
+    // hammer the GitHub release API mid-queue.
+    this.lastAutoUpdateAt = 0;
+  }
+
+  /**
+   * Random delay (ms) between queued downloads. Honors user-configured
+   * min/max from settings; clamps to sensible bounds so the queue never
+   * stalls or hammers SoundCloud.
+   */
+  getInterTrackDelayMs() {
+    const DEFAULT_MIN = 4000;
+    const DEFAULT_MAX = 12000;
+    const HARD_FLOOR = 1000;
+    const HARD_CEIL = 120000;
+
+    let min = DEFAULT_MIN;
+    let max = DEFAULT_MAX;
+    if (this.store) {
+      const cfgMin = Number(this.store.get('interTrackDelayMinMs', DEFAULT_MIN));
+      const cfgMax = Number(this.store.get('interTrackDelayMaxMs', DEFAULT_MAX));
+      if (Number.isFinite(cfgMin)) min = cfgMin;
+      if (Number.isFinite(cfgMax)) max = cfgMax;
+    }
+    min = Math.max(HARD_FLOOR, Math.min(min, HARD_CEIL));
+    max = Math.max(HARD_FLOOR, Math.min(max, HARD_CEIL));
+    if (max < min) max = min;
+
+    return Math.floor(min + Math.random() * (max - min + 1));
+  }
+
+  /**
+   * Wipe yt-dlp's on-disk cache (forces fresh SoundCloud client_id scrape).
+   */
+  async clearYtDlpCache() {
+    try {
+      const ytdlpPath = getYtDlpPath();
+      await execPromise(`"${ytdlpPath}" --rm-cache-dir`);
+      console.log('yt-dlp cache cleared');
+      return true;
+    } catch (error) {
+      console.warn(`Failed to clear yt-dlp cache: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Best-effort yt-dlp self-update used during 403 auto-recovery.
+   * Skipped if we already tried within the last 6 hours.
+   */
+  async autoUpdateYtDlpIfStale() {
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    if (Date.now() - this.lastAutoUpdateAt < SIX_HOURS) {
+      return { skipped: true, reason: 'recent-attempt' };
+    }
+    this.lastAutoUpdateAt = Date.now();
+    try {
+      const result = await this.updateYtDlp();
+      if (result && result.success) {
+        console.log(`yt-dlp auto-update: ${result.message || 'ok'}`);
+      }
+      return result;
+    } catch (error) {
+      console.warn(`yt-dlp auto-update failed: ${error.message}`);
+      return { success: false, error: error.message };
+    }
   }
 
   /**
@@ -137,7 +219,19 @@ class Downloader {
     }
   }
 
-  async downloadSingleTrack(url, downloadPath) {
+  /**
+   * Recover from a SoundCloud 403 by purging yt-dlp's client_id cache and
+   * (at most once every 6 hours) self-updating yt-dlp. Returns true if any
+   * recovery step ran so the caller can retry the download.
+   */
+  async recoverFromAuthBlock() {
+    console.warn('Auth block (403) detected — purging yt-dlp cache and checking for update...');
+    const cleared = await this.clearYtDlpCache();
+    const updated = await this.autoUpdateYtDlpIfStale();
+    return cleared || (updated && updated.success);
+  }
+
+  async downloadSingleTrack(url, downloadPath, _retry = false) {
     try {
       const result = await this.downloadWithYtDlp(url, downloadPath);
       return {
@@ -146,14 +240,19 @@ class Downloader {
         skipped: result.skipped || false
       };
     } catch (error) {
+      if (error.authBlocked && !_retry) {
+        await this.recoverFromAuthBlock();
+        return this.downloadSingleTrack(url, downloadPath, true);
+      }
       console.error('Download failed:', error);
       const wrapped = new Error(`Failed to download track: ${error.message}`);
       if (error.rateLimited) wrapped.rateLimited = true;
+      if (error.authBlocked) wrapped.authBlocked = true;
       throw wrapped;
     }
   }
 
-  async downloadPlaylist(url, downloadPath) {
+  async downloadPlaylist(url, downloadPath, _retry = false) {
     try {
       console.log(`Downloading playlist from: ${url}`);
       console.log(`Save location: ${downloadPath}`);
@@ -167,8 +266,14 @@ class Downloader {
         message: 'Playlist downloaded successfully'
       };
     } catch (error) {
+      if (error.authBlocked && !_retry) {
+        await this.recoverFromAuthBlock();
+        return this.downloadPlaylist(url, downloadPath, true);
+      }
       console.error('Playlist download failed:', error.message);
-      throw new Error(`Failed to download playlist: ${error.message}`);
+      const wrapped = new Error(`Failed to download playlist: ${error.message}`);
+      if (error.authBlocked) wrapped.authBlocked = true;
+      throw wrapped;
     }
   }
 
@@ -304,6 +409,12 @@ class Downloader {
             // 90s cooldown — yt-dlp already retried internally with backoff, so
             // a longer pause before any further request is warranted.
             this.cooldownUntil = Date.now() + 90 * 1000;
+          } else if (isAuthBlockMessage(stderr)) {
+            errorMessage = `SoundCloud rejected the request (HTTP 403). The cached client_id is likely stale.`;
+            const err = new Error(errorMessage);
+            err.authBlocked = true;
+            reject(err);
+            return;
           } else if (stderr.includes('Connection') || stderr.includes('timed out') || stderr.includes('ETIMEDOUT') || stderr.includes('ECONNRESET')) {
             errorMessage = `Network error: ${stderr.trim().split('\n').slice(-1)[0] || 'connection failed'}. Will retry on next sync.`;
           }
@@ -333,7 +444,7 @@ class Downloader {
 
     const { track, downloadPath, resolve, reject } = this.downloadQueue.shift();
 
-    let nextDelayMs = 1500; // baseline spacing between tracks
+    let nextDelayMs = this.getInterTrackDelayMs();
     try {
       const result = await this.downloadSingleTrack(track.url, downloadPath);
       resolve(result);
@@ -345,6 +456,9 @@ class Downloader {
       reject(error);
     }
 
+    if (this.downloadQueue.length > 0 && nextDelayMs > 0) {
+      console.log(`Pacing: sleeping ${Math.round(nextDelayMs / 1000)}s before next download (rate-limit hygiene)`);
+    }
     setTimeout(() => this.processQueue(), nextDelayMs);
   }
 

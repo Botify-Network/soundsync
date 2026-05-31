@@ -191,8 +191,13 @@ function updateTrayMenu() {
 function promptForURL() {
   // Create a simple input dialog using BrowserWindow
   const inputWindow = new BrowserWindow({
-    width: 500,
-    height: 200,
+    width: 520,
+    height: 260,
+    useContentSize: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    autoHideMenuBar: true,
     modal: true,
     show: false,
     frame: true,
@@ -203,24 +208,30 @@ function promptForURL() {
       nodeIntegration: false
     }
   });
+  inputWindow.setMenu(null);
 
   inputWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
     <!DOCTYPE html>
     <html>
     <head>
       <style>
+        html, body { height: 100%; }
         body {
           font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-          padding: 20px;
+          padding: 16px 20px;
           background: #1e293b;
           color: #e2e8f0;
           margin: 0;
+          display: flex;
+          flex-direction: column;
+          box-sizing: border-box;
         }
         h3 {
-          margin-top: 0;
+          margin: 0 0 12px 0;
           color: #f1f5f9;
           font-weight: 600;
           text-align: center;
+          font-size: 16px;
         }
         input {
           width: 100%;
@@ -241,7 +252,7 @@ function promptForURL() {
         .buttons {
           display: flex;
           gap: 10px;
-          margin-top: 20px;
+          margin-top: 14px;
         }
         button {
           flex: 1;
