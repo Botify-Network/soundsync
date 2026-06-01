@@ -1,0 +1,107 @@
+# CodeRabbit configuration for soundsync
+# (Electron 42 tray app — SoundCloud likes/playlists sync via yt-dlp + ffmpeg).
+# Schema: https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+early_access: false
+tone_instructions: >
+  Terse plain English, no emojis/filler. Flag root cause + fix on
+  offending line. Prefer code over prose. Never normalize brand
+  chars Λ/Я/Ξ (PЯIMΞ).
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - master
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/release/**"
+    - "!**/out/**"
+    - "!**/*.min.js"
+    - "!**/package-lock.json"
+    - "!src/assets/**/*.{png,jpg,jpeg,gif,webp,ico,svg,icns}"
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Character integrity HARD RULE. Characters Λ (Greek capital
+        lambda), Я (Cyrillic capital ya), Ξ (Greek capital xi), and
+        the canonical brand string PЯIMΞ are IMMUTABLE. Reject any
+        change that normalizes / transliterates / substitutes with
+        Latin look-alikes (A / R / E / Σ). Applies to tray menu
+        labels, settings UI copy, and notification text.
+    - path: "src/main.js"
+      instructions: |
+        Electron main process. BrowserWindow security: every
+        `new BrowserWindow({ webPreferences: ... })` MUST set
+        (1) `contextIsolation: true`, (2) `nodeIntegration: false`,
+        (3) `sandbox: true` unless a dated rationale comment explains
+        why sandbox is incompatible. Current code (lines 192-203,
+        306-318) has 1+2 but lacks 3 — flag any new window that does
+        not add `sandbox: true`. Also: `webSecurity: false` is BANNED.
+        `enableRemoteModule` MUST NOT appear (deprecated +
+        dangerous). `app.commandLine.appendSwitch('--disable-features=
+        ...')` flagged for review.
+    - path: "src/preload*.js"
+      instructions: |
+        Preload script — the renderer/main bridge. (1) MUST expose
+        functions via `contextBridge.exposeInMainWorld` ONLY —
+        NEVER `window.X = require(...)` or wholesale `ipcRenderer`
+        exposure. (2) Exposed APIs MUST validate every argument
+        before forwarding to `ipcRenderer.invoke` — string length,
+        type, allowed-value enum. (3) No `require` of `child_process`,
+        `fs`, `path`, or other Node built-ins exposed to renderer.
+        (4) IPC channel names MUST be enumerated constants, not
+        runtime-string-built.
+    - path: "src/services/**"
+      instructions: |
+        Service layer (SoundCloud API + yt-dlp + ffmpeg
+        orchestration). (1) Subprocess spawn MUST use
+        `child_process.spawn` with `{ shell: false }` and an args
+        array — NEVER `exec` with a template-string-built command
+        (shell injection vector when SoundCloud titles contain
+        special chars). (2) Downloaded file paths MUST be sanitized
+        — strip `..`, leading `/`, NTFS reserved names (CON, PRN,
+        AUX), and trim to MAX_PATH on Windows. (3) SoundCloud OAuth
+        token storage via `electron-store` MUST set
+        `encryptionKey` (not plaintext JSON on disk).
+    - path: "src/main/**"
+      instructions: |
+        Main-process modules. Same rules as `src/main.js` apply.
+        Auto-update flow (electron-updater) MUST verify code
+        signature — `autoUpdater.signals` events handled, never
+        silently swallow `error`. Update URL pinned to the
+        Botify-Network release feed, not arbitrary.
+    - path: "src/settings.{html,js}"
+      instructions: |
+        Settings renderer. (1) No inline `<script>` or `onclick=`
+        attributes (CSP-friendly). (2) All state mutation goes
+        through preload-exposed APIs — never direct `require` or
+        `window.process.*` access. (3) User-entered credential
+        fields (cookie, token) MUST mask on input (`type="password"`)
+        and submit via IPC, not be persisted in DOM.
+    - path: "scripts/bump-version.js"
+      instructions: |
+        Release version bumper. MUST update package.json + any
+        version refs in main process. Never commit/tag from this
+        script directly — version mutation only.
+    - path: "**/*.test.js"
+      instructions: |
+        Vitest suite. Subprocess / fs tests MUST mock
+        `child_process` and `fs` — real subprocess invocation in
+        CI is forbidden (CI runners lack yt-dlp / ffmpeg).
+    - path: ".github/workflows/**"
+      instructions: |
+        CI hygiene. No `--no-verify`, `--no-gpg-sign`, or hook-skip
+        flags. Release workflows MUST verify electron-builder
+        signing config + GitHub release artifact upload.
+
+chat:
+  auto_reply: true
